@@ -976,6 +976,9 @@ function renderSettingsHealth(h) {
     if (!h.ocr_configured) {
         el.innerHTML += '<p class="settings-hint">Add <code>OCR_SPACE_API_KEY</code> in Vercel to extract real invoice data from images.</p>';
     }
+    if (!h.ai_configured) {
+        el.innerHTML += '<p class="settings-hint">Add <code>GROQ_API_KEY</code> in Vercel to enable AI categorization, then <strong>redeploy</strong>. Get a free key at <code>console.groq.com/keys</code>. This setting is only read on the server at deploy time.</p>';
+    }
 }
 
 async function saveSettings() {
