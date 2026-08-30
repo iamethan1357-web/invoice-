@@ -39,12 +39,26 @@ CLERK_SECRET_KEY = os.environ.get("CLERK_SECRET_KEY", "")
 AUTH_ENABLED = bool(CLERK_SECRET_KEY) and bool(CLERK_PUBLISHABLE_KEY)  # Need both keys
 USE_SQLITE_FALLBACK = not DATABASE_URL  # Auto-use SQLite locally if no Neon URL
 
-# Optional AI-powered categorization. Add AI_API_KEY (or OPENAI_API_KEY) to
-# Vercel to enable live AI categorization. Without it, the app automatically
-# falls back to a fast local keyword/scoring classifier.
-AI_API_KEY = os.environ.get("AI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
-AI_API_BASE = os.environ.get("AI_API_BASE", "https://api.openai.com/v1").rstrip("/")
-AI_MODEL = os.environ.get("AI_MODEL", "gpt-4o-mini")
+# Optional AI-powered categorization. Supported providers (all OpenAI-compatible):
+#   - Groq (recommended + free): set GROQ_API_KEY only, or AI_API_KEY + AI_API_BASE + AI_MODEL
+#   - OpenAI: set OPENAI_API_KEY or AI_API_KEY (+ optional AI_API_BASE, AI_MODEL)
+#   - Any OpenAI-compatible endpoint: set AI_API_KEY, AI_API_BASE, AI_MODEL
+# Without a key the app falls back to a fast local keyword/scoring classifier.
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+AI_API_KEY = (
+    os.environ.get("AI_API_KEY")
+    or os.environ.get("OPENAI_API_KEY", "")
+    or GROQ_API_KEY
+)
+AI_API_BASE = os.environ.get("AI_API_BASE", "").rstrip("/")
+if not AI_API_BASE:
+    AI_API_BASE = "https://api.groq.com/openai/v1" if GROQ_API_KEY else "https://api.openai.com/v1"
+AI_MODEL = os.environ.get("AI_MODEL", "")
+if not AI_MODEL:
+    AI_MODEL = "llama-3.3-70b-versatile" if GROQ_API_KEY else "gpt-4o-mini"
+AI_PROVIDER = (
+    "groq" if GROQ_API_KEY else "openai" if os.environ.get("OPENAI_API_KEY") else "custom" if AI_API_KEY else "rules"
+)
 
 # Vercel serverless filesystems are read-only except for /tmp, so the SQLite
 # fallback must use /tmp (or a local file when running outside Vercel).
@@ -1829,6 +1843,8 @@ async def get_settings(request: Request):
         "health": {
             "ocr_configured": bool(OCR_SPACE_API_KEY),
             "ai_configured": bool(AI_API_KEY),
+            "ai_provider": AI_PROVIDER,
+            "ai_model": AI_MODEL if AI_API_KEY else "",
             "auth_enabled": AUTH_ENABLED,
             "database": "PostgreSQL" if not USE_SQLITE_FALLBACK else "SQLite (local)",
         },

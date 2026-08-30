@@ -959,9 +959,12 @@ async function loadSettings() {
 function renderSettingsHealth(h) {
     const el = document.getElementById('settingsHealth');
     if (!el) return;
+    const aiLabel = h.ai_configured
+        ? (`${(h.ai_provider || 'AI')} · ${h.ai_model || ''}`).trim()
+        : 'Using local rules';
     const rows = [
         ['OCR Engine', h.ocr_configured ? 'Configured' : 'Not configured (demo mode)', h.ocr_configured],
-        ['AI Categorization', h.ai_configured ? 'Configured' : 'Using local rules', h.ai_configured],
+        ['AI Categorization', aiLabel, h.ai_configured],
         ['Authentication', h.auth_enabled ? 'Protected (Clerk)' : 'Open access', h.auth_enabled],
         ['Database', h.database || 'Unknown', true],
     ];
