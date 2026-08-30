@@ -40,10 +40,14 @@ USE_SQLITE_FALLBACK = not DATABASE_URL  # Auto-use SQLite locally if no Neon URL
 
 # Vercel serverless filesystems are read-only except for /tmp, so the SQLite
 # fallback must use /tmp (or a local file when running outside Vercel).
-IS_VERCEL = os.environ.get("VERCEL", "") == "1"
+IS_SERVERLESS = bool(
+    os.environ.get("VERCEL") == "1"
+    or os.environ.get("VERCEL_ENV")
+    or os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
+)
 _SQLITE_DB_PATH = (
     "/tmp/invoice_scanner_pro.db"
-    if IS_VERCEL
+    if IS_SERVERLESS
     else os.path.join(os.path.dirname(__file__), "..", "invoices_local.db")
 )
 
