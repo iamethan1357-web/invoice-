@@ -216,11 +216,24 @@ async function uploadFile(file) {
         // Mark all steps as done
         steps.forEach(id => { document.getElementById(id).className = 'scan-step done'; });
         
-        if (data.error) { showToast(data.error, 'error'); resetScan(); return; }
+        if (!res.ok || data.error || data.detail) {
+            showToast(data.error || data.detail || `Scan failed (${res.status})`, 'error');
+            resetScan();
+            return;
+        }
+        if (!data.data || data.success === false) {
+            showToast(data.detail || 'No invoice data returned', 'error');
+            resetScan();
+            return;
+        }
         
         // Brief pause before showing result
         setTimeout(() => displayResult(data.data, data.is_demo), 400);
-        showToast(data.message || 'Scanned!', 'success');
+        if (data.save_error) {
+            showToast('Data extracted, but could not be saved: ' + data.save_error, 'error');
+        } else {
+            showToast(data.message || 'Scanned!', 'success');
+        }
     } catch (err) {
         clearInterval(interval);
         showToast('Scan failed. Please try again.', 'error');
@@ -242,12 +255,23 @@ async function scanOcrText() {
             body: JSON.stringify({ text, save: false })
         });
         const data = await res.json();
-        if (data.error) { showToast(data.error, 'error'); return; }
+        if (!res.ok || data.error || data.detail) {
+            showToast(data.error || data.detail || `Extraction failed (${res.status})`, 'error');
+            return;
+        }
+        if (!data.data || data.success === false) {
+            showToast(data.detail || 'No invoice data returned', 'error');
+            return;
+        }
         document.getElementById('uploadZone').style.display = 'none';
         document.getElementById('processing').style.display = 'none';
         document.getElementById('scanResult').style.display = 'block';
         displayResult(data.data, false);
-        showToast(data.message || 'Extracted!', 'success');
+        if (data.save_error) {
+            showToast('Data extracted, but could not be saved: ' + data.save_error, 'error');
+        } else {
+            showToast(data.message || 'Extracted!', 'success');
+        }
     } catch (err) {
         showToast('Extraction failed. Please try again.', 'error');
     }

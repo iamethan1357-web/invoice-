@@ -1346,13 +1346,19 @@ async def scan_text(request: Request):
         parsed['total_inr'] = round(parsed['total_amount'] * rate, 2)
 
     invoice_id = None
+    save_error = None
     if body.get("save") is True:
-        invoice_id = str(uuid.uuid4())
-        _save_parsed_invoice(parsed, user_id, invoice_id, raw_text, "pasted-ocr-text.txt")
+        try:
+            invoice_id = str(uuid.uuid4())
+            _save_parsed_invoice(parsed, user_id, invoice_id, raw_text, "pasted-ocr-text.txt")
+        except Exception as e:
+            print(f"⚠️  Text scan DB save failed: {e}")
+            save_error = str(e)
 
     return {
         "success": True,
         "invoice_id": invoice_id,
+        "save_error": save_error,
         "data": {
             "vendor_name": parsed.get("vendor_name", "Unknown"),
             "invoice_number": parsed.get("invoice_number", ""),
@@ -1427,18 +1433,27 @@ async def scan_invoice(file: UploadFile = File(...), request: Request = None):
             rate = EXCHANGE_RATES_TO_INR.get(parsed.get('currency', 'INR'), 1.0)
             parsed['total_inr'] = round(parsed['total_amount'] * rate, 2)
 
-        # Save to database
-        invoice_id = str(uuid.uuid4())
-        _save_parsed_invoice(
-            parsed, user_id, invoice_id,
-            raw_text=raw_text or "Demo scan",
-            original_name=filename,
-            filename=hashlib.md5(content).hexdigest() + os.path.splitext(filename)[1],
-        )
+        # Save to database. If the DB write fails (e.g. a Neon/Postgres issue),
+        # still return the extracted fields so the user isn't shown a blank
+        # result; include the save error separately.
+        invoice_id = None
+        save_error = None
+        try:
+            invoice_id = str(uuid.uuid4())
+            _save_parsed_invoice(
+                parsed, user_id, invoice_id,
+                raw_text=raw_text or "Demo scan",
+                original_name=filename,
+                filename=hashlib.md5(content).hexdigest() + os.path.splitext(filename)[1],
+            )
+        except Exception as e:
+            print(f"⚠️  Scan DB save failed: {e}")
+            save_error = str(e)
 
         return {
             "success": True,
             "invoice_id": invoice_id,
+            "save_error": save_error,
             "data": {
                 "vendor_name": parsed['vendor_name'],
                 "invoice_number": parsed['invoice_number'],
