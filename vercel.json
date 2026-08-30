@@ -4,7 +4,9 @@
     {
       "src": "api/index.py",
       "use": "@vercel/python",
-      "config": { "maxLambdaSize": "150mb" }
+      "config": {
+        "maxLambdaSize": "150mb"
+      }
     },
     {
       "src": "public/**",
@@ -23,6 +25,10 @@
     {
       "src": "/",
       "dest": "/public/index.html"
+    },
+    {
+      "src": "/login",
+      "dest": "/public/login.html"
     },
     {
       "src": "/(.*)",

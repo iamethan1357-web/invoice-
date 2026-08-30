@@ -30,6 +30,15 @@ async function getAuthToken() {
     return null;
 }
 
+async function signOut() {
+    try {
+        if (window.__clerk) await window.__clerk.signOut();
+    } catch (e) {
+        console.error('Sign out failed:', e);
+    }
+    window.location.replace('/login');
+}
+
 async function authFetch(url, options = {}) {
     const token = await getAuthToken();
     if (token) {
@@ -42,8 +51,6 @@ async function authFetch(url, options = {}) {
 document.addEventListener('DOMContentLoaded', () => {
     // Initial load is handled by the auth init script in HTML
     // This listener only runs if auth is disabled or already resolved
-    // Apply the saved theme immediately to avoid a dark/light flash.
-    (function(){ const saved = localStorage.getItem('isp_theme'); if (saved) setTheme(saved); else setTheme('dark'); })();
     // Hide scan badge after first view
     setTimeout(() => { const b = document.getElementById('scanBadge'); if(b) b.style.display='none'; }, 5000);
 });
@@ -907,15 +914,8 @@ function exportQuickBooks() {
 const SETTINGS_FIELDS = [
     'business_name', 'business_address', 'business_email', 'business_phone', 'business_gstin',
     'default_currency', 'default_tax_rate', 'default_discount_rate', 'default_payment_status',
-    'payment_terms', 'invoice_footer', 'accent_color', 'theme'
+    'payment_terms', 'invoice_footer', 'accent_color'
 ];
-
-function setTheme(theme) {
-    const light = theme === 'light';
-    document.body.classList.toggle('theme-light', light);
-    document.body.classList.toggle('theme-dark', !light);
-    try { localStorage.setItem('isp_theme', theme); } catch(e) {}
-}
 
 async function loadSettings() {
     try {
@@ -939,7 +939,6 @@ async function loadSettings() {
         setVal('setTerms', s.payment_terms);
         setVal('setFooter', s.invoice_footer);
         setVal('setAccent', s.accent_color || '#4f46e5');
-        setVal('setTheme', s.theme || 'dark');
 
         // Populate currency options.
         const curSel = document.getElementById('setCurrency');
@@ -950,7 +949,6 @@ async function loadSettings() {
 
         // Health/integration status.
         renderSettingsHealth(data.health || {});
-        setTheme(s.theme || 'dark');
     } catch (err) {
         showToast('Could not load settings', 'error');
     }
@@ -990,7 +988,7 @@ async function saveSettings() {
             business_gstin: 'setBusinessGstin', default_currency: 'setCurrency',
             default_tax_rate: 'setTaxRate', default_discount_rate: 'setDiscountRate',
             default_payment_status: 'setDefaultStatus', payment_terms: 'setTerms',
-            invoice_footer: 'setFooter', accent_color: 'setAccent', theme: 'setTheme'
+            invoice_footer: 'setFooter', accent_color: 'setAccent'
         };
         const el = document.getElementById(map[k]);
         const raw = el ? el.value : '';
@@ -1014,7 +1012,6 @@ async function saveSettings() {
             showToast(data.error || data.detail || 'Could not save settings', 'error');
             return;
         }
-        setTheme((data.settings || {}).theme || payload.theme || 'dark');
         showToast('Settings saved', 'success');
     } catch (err) {
         showToast('Could not save settings', 'error');
