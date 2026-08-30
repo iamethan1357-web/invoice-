@@ -30,6 +30,15 @@ async function getAuthToken() {
     return null;
 }
 
+async function signOut() {
+    try {
+        if (window.__clerk) await window.__clerk.signOut();
+    } catch (e) {
+        console.error('Sign out failed:', e);
+    }
+    window.location.replace('/login');
+}
+
 async function authFetch(url, options = {}) {
     const token = await getAuthToken();
     if (token) {

@@ -76,6 +76,14 @@
 
 > 💡 Clerk free tier: 10,000 monthly active users, unlimited social logins. More than enough to start!
 
+**How the login works once both keys are set:**
+
+- `/login` renders Clerk's sign-in card; `/login?mode=sign-up` renders the sign-up card.
+- The app at `/` stays hidden until Clerk resolves the session, then redirects signed-out visitors to `/login` — so the dashboard never flashes past.
+- The signed-in user's initials and a sign-out button appear in the top bar.
+- Session tokens are verified in `api/index.py` against your instance's JWKS. Set `CLERK_JWT_KEY` (PEM public key from **API Keys → JWT Public Key**) to verify locally instead, and `CLERK_AUTHORIZED_PARTIES` to reject tokens minted for other origins.
+- Leave the keys unset and the app runs in open-access mode, exactly as before.
+
 ---
 
 ### Step 3: Deploy to Vercel — 2 minutes

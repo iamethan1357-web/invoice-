@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign in · Invoice Scanner Pro</title>
+    <meta name="robots" content="noindex">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234f46e5'/><path d='M8 10h16M8 16h12M8 22h8' stroke='white' stroke-width='2.5' stroke-linecap='round'/></svg>">
+    <style>
+        /* Inline critical fallback — matches the :root light palette in style.css */
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;background:#f6f7f9;color:#111827;min-height:100vh}
+    </style>
+</head>
+<body>
+    <main id="authScreen">
+        <div class="auth-container">
+            <div class="auth-header">
+                <div class="auth-logo">
+                    <div class="logo-icon">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    </div>
+                    <span class="logo-text">InvoicePro</span>
+                </div>
+                <h1 class="auth-title" id="authTitle">Sign in</h1>
+                <p class="auth-subtitle" id="authSubtitle">Scan invoices, extract the numbers, export to Tally or QuickBooks.</p>
+            </div>
+
+            <!-- Clerk mounts its <SignIn /> / <SignUp /> component here -->
+            <div id="clerkMount"></div>
+
+            <div class="auth-status" id="authStatus" hidden>
+                <span class="auth-spinner" aria-hidden="true"></span>
+                <span id="authStatusText">Loading sign-in…</span>
+            </div>
+
+            <div class="auth-error" id="authError" hidden>
+                <strong>Sign-in could not start</strong>
+                <p id="authErrorDetail"></p>
+                <p class="auth-error-hint">Check that <code>CLERK_PUBLISHABLE_KEY</code> and <code>CLERK_SECRET_KEY</code> are both set in your environment, then redeploy.</p>
+                <a class="btn btn-primary auth-error-action" href="/">Continue to the app</a>
+            </div>
+
+            <div class="auth-note" id="authDisabled" hidden>
+                <strong>Authentication is turned off</strong>
+                <p>This deployment has no Clerk keys configured, so the app is open to anyone with the URL.</p>
+                <a class="btn btn-primary auth-error-action" href="/">Continue to the app</a>
+            </div>
+
+            <p class="auth-footnote">Secured by Clerk</p>
+        </div>
+    </main>
+
+    <script src="/js/auth.js"></script>
+    <script>
+        (function () {
+            const mount = document.getElementById('clerkMount');
+            const statusBox = document.getElementById('authStatus');
+            const statusText = document.getElementById('authStatusText');
+            const errorBox = document.getElementById('authError');
+            const errorDetail = document.getElementById('authErrorDetail');
+            const disabledBox = document.getElementById('authDisabled');
+            const title = document.getElementById('authTitle');
+            const subtitle = document.getElementById('authSubtitle');
+
+            const params = new URLSearchParams(window.location.search);
+            const wantSignUp = params.get('mode') === 'sign-up' || params.has('sign_up');
+            let mounted = false;
+
+            function showStatus(text) {
+                statusText.textContent = text;
+                statusBox.hidden = false;
+            }
+            function hideStatus() { statusBox.hidden = true; }
+            function showError(detail) {
+                hideStatus();
+                errorDetail.textContent = detail;
+                errorBox.hidden = false;
+            }
+
+            function render(clerk) {
+                if (clerk.isSignedIn) {
+                    // Signed in already — go straight to the app.
+                    hideStatus();
+                    mount.innerHTML = '';
+                    showStatus('Signed in — opening the app…');
+                    window.location.replace('/');
+                    return;
+                }
+                hideStatus();
+                if (mounted) return;   // clerk.addListener fires on every state change
+                mounted = true;
+
+                if (wantSignUp) {
+                    title.textContent = 'Create your account';
+                    subtitle.textContent = 'Sign up to keep your invoices, settings and exports in one place.';
+                    clerk.mountSignUp(mount, {
+                        signInUrl: '/login',
+                        afterSignInUrl: '/',
+                        afterSignUpUrl: '/'
+                    });
+                } else {
+                    title.textContent = 'Sign in';
+                    clerk.mountSignIn(mount, {
+                        signUpUrl: '/login?mode=sign-up',
+                        afterSignInUrl: '/',
+                        redirectUrl: '/'
+                    });
+                }
+            }
+
+            async function boot() {
+                showStatus('Checking your session…');
+
+                const config = await InvoiceAuth.fetchAuthConfig();
+                if (config.error) {
+                    showError('Could not reach /api/auth/config — ' + config.error);
+                    return;
+                }
+                if (!config.enabled || !config.publishable_key) {
+                    hideStatus();
+                    disabledBox.hidden = false;
+                    return;
+                }
+
+                try {
+                    showStatus('Loading sign-in…');
+                    const clerk = await InvoiceAuth.initClerk(config);
+                    clerk.addListener(function () { render(clerk); });
+                    render(clerk);
+                } catch (err) {
+                    console.error('Clerk init error:', err);
+                    showError(String((err && err.message) || err));
+                }
+            }
+
+            boot();
+        })();
+    </script>
+</body>
+</html>

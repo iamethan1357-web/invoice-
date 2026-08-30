@@ -23,7 +23,7 @@
 </head>
 <body>
     <!-- ═══ Sidebar ═══ -->
-    <div id="app" style="display:flex;width:100%;">
+    <div id="app" style="display:none;width:100%;">
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <div class="logo">
@@ -100,7 +100,12 @@
                 <button class="btn-icon" onclick="showPage('settings')" title="Settings">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 </button>
-                <div class="user-avatar">JP</div>
+                <div class="user-menu" id="userMenu" hidden>
+                    <div class="user-avatar" id="userAvatar" title="">··</div>
+                    <button class="btn-icon" onclick="signOut()" title="Sign out">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                    </button>
+                </div>
             </div>
         </header>
 
@@ -554,75 +559,42 @@
 
     <div class="toast" id="toast"></div>
     
-    <!-- ═══ Clerk Auth (loaded conditionally) ═══ -->
-    <div id="authScreen" style="display:none;">
-        <div class="auth-container" id="clerkMount"></div>
-    </div>
-    
+    <script src="/js/auth.js"></script>
     <script>
-        // Auth initialization — checks if Clerk is enabled and shows login if needed
+        // Auth gate - the app stays hidden until Clerk resolves, so a signed-out
+        // visitor never sees the dashboard flash past on the way to /login.
         (async function initAuth() {
-            const showApp = () => {
-                document.getElementById('authScreen').style.display = 'none';
-                document.getElementById('app').style.display = 'flex';
+            const appEl = document.getElementById('app');
+            const menu = document.getElementById('userMenu');
+            const avatar = document.getElementById('userAvatar');
+
+            const showApp = (user) => {
+                appEl.style.display = 'flex';
+                if (user && menu && avatar) {
+                    avatar.textContent = InvoiceAuth.initialsOf(user);
+                    avatar.title = (user.primaryEmailAddress && user.primaryEmailAddress.emailAddress) || 'Signed in';
+                    menu.hidden = false;
+                }
                 if (typeof checkHealth === 'function') checkHealth();
                 if (typeof loadDashboard === 'function') loadDashboard();
                 if (typeof setupUploadZone === 'function') setupUploadZone();
             };
 
+            const config = await InvoiceAuth.fetchAuthConfig();
+            if (!config.enabled || !config.publishable_key) {
+                showApp(null);   // auth disabled - open access, as before
+                return;
+            }
+
             try {
-                const res = await fetch('/api/auth/config');
-                const config = await res.json();
-
-                if (config.enabled && config.publishable_key) {
-                    // Load Clerk JS dynamically
-                    const script = document.createElement('script');
-                    script.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
-                    script.async = true;
-
-                    script.onload = async function () {
-                        try {
-                            const clerk = new window.Clerk(config.publishable_key);
-                            window.__clerk = clerk;
-                            await clerk.load();
-
-                            const render = () => {
-                                if (clerk.isSignedIn) {
-                                    // User is signed in — show app and initialize it
-                                    showApp();
-                                } else {
-                                    // Show login
-                                    document.getElementById('authScreen').style.display = 'flex';
-                                    document.getElementById('app').style.display = 'none';
-                                    clerk.mountSignIn(document.getElementById('clerkMount'), {
-                                        signUpUrl: '/?sign_up=true',
-                                        afterSignInUrl: window.location.origin,
-                                    });
-                                }
-                            };
-
-                            clerk.addListener(render);
-                            render();
-                        } catch (err) {
-                            console.error('Clerk init error:', err);
-                            showApp();
-                        }
-                    };
-
-                    script.onerror = function () {
-                        console.error('Failed to load Clerk JS');
-                        showApp();
-                    };
-
-                    document.head.appendChild(script);
-                } else {
-                    // No auth — show app directly
-                    showApp();
-                }
-            } catch (e) {
-                console.error('Auth init error:', e);
-                // Fallback: show app without auth
-                showApp();
+                const clerk = await InvoiceAuth.initClerk(config);
+                if (clerk.isSignedIn) showApp(clerk.user);
+                else window.location.replace('/login');
+            } catch (err) {
+                // A Clerk outage must not brick the app; the API still enforces
+                // tokens, so a signed-out user simply gets 401s from it.
+                console.error('Clerk init error:', err);
+                showApp(null);
             }
         })();
     </script>

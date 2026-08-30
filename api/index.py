@@ -37,6 +37,44 @@ OCR_SPACE_API_KEY = os.environ.get("OCR_SPACE_API_KEY", "")
 CLERK_PUBLISHABLE_KEY = os.environ.get("CLERK_PUBLISHABLE_KEY", "")
 CLERK_SECRET_KEY = os.environ.get("CLERK_SECRET_KEY", "")
 AUTH_ENABLED = bool(CLERK_SECRET_KEY) and bool(CLERK_PUBLISHABLE_KEY)  # Need both keys
+
+# Optional: PEM public key from Clerk Dashboard -> API Keys -> JWT Public Key.
+# When set, tokens are verified locally with no JWKS round-trip.
+CLERK_JWT_KEY = os.environ.get("CLERK_JWT_KEY", "").replace("\\n", "\n")
+# Optional: comma-separated origins allowed to mint session tokens (checked
+# against the token's azp claim). Only enforced when set.
+CLERK_AUTHORIZED_PARTIES = [
+    p.strip() for p in os.environ.get("CLERK_AUTHORIZED_PARTIES", "").split(",") if p.strip()
+]
+
+
+def _clerk_frontend_api(publishable_key: str) -> str:
+    """Derive the Frontend API domain from a Clerk publishable key.
+
+    pk_test_<base64> decodes to "<instance>.clerk.accounts.dev$"; the trailing
+    "$" is a padding marker Clerk appends, so it is stripped. Returns "" when
+    the key is missing or malformed (live keys use a different prefix scheme).
+    """
+    parts = (publishable_key or "").split("_")
+    if len(parts) < 3:
+        return ""
+    try:
+        payload = parts[2]
+        payload += "=" * (-len(payload) % 4)  # restore padding the URL form drops
+        return base64.b64decode(payload).decode("utf-8", "replace").rstrip("$").strip()
+    except Exception:
+        return ""
+
+
+CLERK_FRONTEND_API = _clerk_frontend_api(CLERK_PUBLISHABLE_KEY)
+CLERK_BACKEND_JWKS_URL = "https://api.clerk.com/v1/jwks"
+# The Frontend API JWKS endpoint is public; the Backend API one needs the
+# secret key, so prefer the former whenever the domain is derivable.
+CLERK_JWKS_URL = (
+    f"https://{CLERK_FRONTEND_API}/.well-known/jwks.json"
+    if CLERK_FRONTEND_API
+    else CLERK_BACKEND_JWKS_URL
+)
 USE_SQLITE_FALLBACK = not DATABASE_URL  # Auto-use SQLite locally if no Neon URL
 
 # Optional AI-powered categorization. Supported providers (all OpenAI-compatible):
@@ -118,6 +156,16 @@ async def serve_index():
         return HTMLResponse(index_path.read_text())
     return HTMLResponse("<h1>Invoice Scanner Pro</h1><p>Frontend files not found</p>")
 
+
+@app.get("/login")
+@app.get("/login.html")
+async def serve_login():
+    """Clerk login page — public, no token required."""
+    login_path = pathlib.Path(__file__).parent.parent / "public" / "login.html"
+    if login_path.exists():
+        return HTMLResponse(login_path.read_text())
+    return HTMLResponse("<h1>Sign in</h1><p>Login page not found</p>")
+
 # ─── Clerk Authentication ────────────────────────────────────────────────────
 
 class ClerkAuth:
@@ -125,43 +173,60 @@ class ClerkAuth:
     
     def __init__(self):
         self.jwks_client = None
-        if AUTH_ENABLED:
+        # CLERK_JWT_KEY (PEM public key) makes verification local; otherwise the
+        # signing key is fetched from the instance JWKS and cached.
+        if AUTH_ENABLED and not CLERK_JWT_KEY:
             try:
-                # Clerk's JWKS URL for token verification
-                jwks_url = "https://api.clerk.com/v1/jwks"
-                self.jwks_client = PyJWKClient(jwks_url, cache_jwk_set=True, lifespan=3600)
+                headers = None
+                if CLERK_JWKS_URL == CLERK_BACKEND_JWKS_URL:
+                    # The Backend API JWKS endpoint is authenticated; the
+                    # Frontend API one is public.
+                    headers = {"Authorization": f"Bearer {CLERK_SECRET_KEY}"}
+                self.jwks_client = PyJWKClient(
+                    CLERK_JWKS_URL, cache_jwk_set=True, lifespan=3600, headers=headers
+                )
             except Exception as e:
                 print(f"⚠️  Clerk JWKS init error: {e}")
-    
+
     def verify_token(self, token: str) -> Optional[dict]:
-        """Verify Clerk JWT and return user info."""
-        if not AUTH_ENABLED or not self.jwks_client:
+        """Verify a Clerk session JWT and return its claims."""
+        if not AUTH_ENABLED:
             return None
-        
+        if not CLERK_JWT_KEY and not self.jwks_client:
+            return None
+
         try:
-            # Get signing key from Clerk's JWKS
-            signing_key = self.jwks_client.get_signing_key_from_jwt(token)
-            
-            # Decode and verify the token
+            if CLERK_JWT_KEY:
+                signing_key = CLERK_JWT_KEY
+            else:
+                signing_key = self.jwks_client.get_signing_key_from_jwt(token).key
+
             payload = jwt.decode(
                 token,
-                signing_key.key,
+                signing_key,
                 algorithms=["RS256"],
-                audience=os.environ.get("CLERK_APP_ID", ""),  # Optional audience check
-                options={"verify_aud": False}  # Clerk tokens may not have audience
+                options={"verify_aud": False},  # Clerk session tokens carry azp, not aud
             )
-            
-            return {
-                "user_id": payload.get("sub"),
-                "email": payload.get("email"),
-                "name": payload.get("name"),
-            }
+        except HTTPException:
+            raise
         except jwt.ExpiredSignatureError:
             raise HTTPException(status_code=401, detail="Token expired")
         except jwt.InvalidTokenError as e:
             raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
         except Exception as e:
             raise HTTPException(status_code=401, detail=f"Auth failed: {str(e)}")
+
+        # Clerk recommends checking azp so a token minted for another origin
+        # cannot be replayed against this deployment.
+        azp = payload.get("azp")
+        if CLERK_AUTHORIZED_PARTIES and azp and azp not in CLERK_AUTHORIZED_PARTIES:
+            raise HTTPException(status_code=401, detail="Token was issued for an unauthorized origin")
+
+        return {
+            "user_id": payload.get("sub"),
+            "email": payload.get("email"),
+            "name": payload.get("name"),
+        }
 
 # Global auth instance
 clerk_auth = ClerkAuth()
@@ -1511,6 +1576,9 @@ async def auth_config():
     return {
         "enabled": AUTH_ENABLED,
         "publishable_key": CLERK_PUBLISHABLE_KEY,
+        "frontend_api": CLERK_FRONTEND_API,
+        "sign_in_url": "/login",
+        "sign_up_url": "/login?mode=sign-up",
     }
 
 
