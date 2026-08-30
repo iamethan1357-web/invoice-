@@ -242,6 +242,7 @@ function displayResult(d, isDemo) {
     document.getElementById('resVendor').textContent = d.vendor_name || '—';
     document.getElementById('resInvoiceNo').textContent = d.invoice_number || '—';
     document.getElementById('resDate').textContent = fmtDate(d.invoice_date);
+    document.getElementById('resDueDate').textContent = fmtDate(d.due_date);
     document.getElementById('resCurrency').textContent = d.currency || '—';
     document.getElementById('resSubtotal').textContent = fmtCur(d.subtotal, d.currency);
     document.getElementById('resTaxRate').textContent = d.tax_rate ? d.tax_rate + '%' : '—';
@@ -257,6 +258,16 @@ function displayResult(d, isDemo) {
         document.getElementById('lineItemsBody').innerHTML = items.map(i => `<tr><td>${esc(i.description)}</td><td>${fmtCur(i.amount, d.currency)}</td></tr>`).join('');
     } else {
         document.getElementById('lineItemsSection').style.display = 'none';
+    }
+    
+    // Raw OCR text (helps diagnose extraction issues)
+    const raw = d.raw_text || '';
+    const rawEl = document.getElementById('rawTextSection');
+    if (raw && !isDemo) {
+        document.getElementById('rawText').textContent = raw;
+        rawEl.style.display = 'block';
+    } else {
+        rawEl.style.display = 'none';
     }
 }
 
@@ -352,6 +363,7 @@ async function viewInvoice(id) {
             <div class="modal-detail-row"><span class="label">Vendor</span><span class="value">${esc(d.vendor_name)}</span></div>
             <div class="modal-detail-row"><span class="label">Invoice #</span><span class="value">${esc(d.invoice_number)}</span></div>
             <div class="modal-detail-row"><span class="label">Date</span><span class="value">${fmtDate(d.invoice_date)}</span></div>
+            <div class="modal-detail-row"><span class="label">Due Date</span><span class="value">${fmtDate(d.due_date)}</span></div>
             <div class="modal-detail-row"><span class="label">Subtotal</span><span class="value">${fmtCur(d.subtotal, d.currency)}</span></div>
             <div class="modal-detail-row"><span class="label">Tax (${d.tax_rate}%)</span><span class="value">${fmtCur(d.tax_amount, d.currency)}</span></div>
             <div class="modal-detail-row"><span class="label">Total</span><span class="value" style="color:var(--brand-400);font-size:16px">${fmtCur(d.total_amount, d.currency)}</span></div>

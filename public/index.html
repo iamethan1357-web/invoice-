@@ -157,6 +157,7 @@
                         <div class="data-item"><label>Vendor</label><span id="resVendor">—</span></div>
                         <div class="data-item"><label>Invoice #</label><span id="resInvoiceNo">—</span></div>
                         <div class="data-item"><label>Date</label><span id="resDate">—</span></div>
+                        <div class="data-item"><label>Due Date</label><span id="resDueDate">—</span></div>
                         <div class="data-item"><label>Currency</label><span id="resCurrency">—</span></div>
                         <div class="data-item"><label>Subtotal</label><span id="resSubtotal">—</span></div>
                         <div class="data-item"><label>Tax Rate</label><span id="resTaxRate">—</span></div>
@@ -173,6 +174,10 @@
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                         Demo mode — add <code>OCR_SPACE_API_KEY</code> for real extraction
                     </div>
+                    <details class="raw-text" id="rawTextSection" style="display:none;">
+                        <summary>View raw OCR text (debug)</summary>
+                        <pre id="rawText"></pre>
+                    </details>
                     <div class="result-actions">
                         <button class="btn btn-primary" onclick="showPage('invoices')">View in Dashboard</button>
                         <button class="btn btn-secondary" onclick="resetScan()">Scan Another</button>

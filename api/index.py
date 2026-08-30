@@ -356,132 +356,425 @@ def _seed_demo_data(conn):
 
 
 # ─── Invoice Parser ──────────────────────────────────────────────────────────
+_MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+_AMOUNT_RE = r"[0-9][0-9,]*(?:\.[0-9]{1,2})?"
+
 
 class InvoiceParser:
-    """Extract structured data from OCR text using smart regex patterns."""
+    """Extract structured data from OCR text using flexible line & regex parsing."""
 
-    PATTERNS = {
-        "invoice_number": [
-            r"(?:invoice\s*no|inv\s*no|bill\s*no|receipt\s*no|invoice\s*number)[\s\.#:]*([A-Z0-9][A-Z0-9\-/]{2,24})",
-            r"(?:invoice|inv|bill|receipt)[\s\.#:]*(?:no|number|#)?[\s\.#:]*([A-Z]{1,4}[\-/]?\d{2,4}(?:[\-/]\d{2,4})*)",
-            r"#\s*([A-Z]{1,4}[\-/]?\d{2,4})",
-        ],
-        "date": [
-            r"(?:date|dated|invoice\s*date|bill\s*date|receipt\s*date)[\s:]*([\d]{1,2}[\s/\-\.][\d]{1,2}[\s/\-\.][\d]{2,4})",
-            r"(?:date)[\s:]*([\d]{4}[\-\/\.][\d]{1,2}[\-\/\.][\d]{1,2})",
-            r"(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})",
-            r"((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4})",
-            r"(\d{1,2}/\d{1,2}/\d{2,4})",
-            r"(\d{4}-\d{2}-\d{2})",
-        ],
-        "due_date": [
-            r"(?:due\s*date|payment\s*due|pay\s*by|due)[\s:]*([\d]{1,2}[\s/\-\.][\d]{1,2}[\s/\-\.][\d]{2,4})",
-        ],
-        "vendor": [
-            r"(?:from|seller|vendor|company|business|issued\s*by|billed\s*by|supplier)[\s:]*\n?([A-Z][A-Za-z &\'.]{2,45})",
-        ],
-        "total": [
-            r"(?:grand\s*total|total\s*due|net\s*total|total\s*amount|invoice\s*total|amount\s*due)[\s:₹$€£]*[\s]*([\d,]+\.?\d*)",
-            r"(?:^|\n)\s*total[\s:₹$€£Rs\.]*[\s]*([\d,]+\.\d{2})",
-        ],
-        "subtotal": [
-            r"(?:sub[\s-]*total|taxable\s*value)[\s:₹$€£Rs\.]*[\s]*([\d,]+\.?\d*)",
-        ],
-        "tax": [
-            r"(?:total\s*(?:gst|vat|tax)|gst|vat|igst|sgst\+cgst)[\s:₹$€£]*[\s]*([\d,]+\.?\d*)",
-        ],
-        "tax_rate": [
-            r"(?:gst|vat|tax|rate)[\s:]*(\d+\.?\d*)\s*%",
-            r"(\d+\.?\d*)\s*%\s*(?:gst|vat|tax)",
-            r"@[\s]*(\d+\.?\d*)\s*%",
-        ],
+    # Labels that mark the end of the line-item table.
+    _SUMMARY_RE = re.compile(
+        r"^(sub\s*total|subtotal|total\b|grand\s*total|net\s*total|net\s*payable|"
+        r"amount\s*(?:due|payable|paid)|balance\s*due|"
+        r"tax\s*amount|total\s*tax|taxable\s*(?:amount|value)|"
+        r"gst\b|cgst\b|sgst\b|igst\b|vat\b|discount\b|round(?:\s*off)?\b)",
+        re.IGNORECASE,
+    )
+
+    # Lines that look like a table header for line items.
+    _ITEM_HEADER_RE = re.compile(
+        r"^(s(?:r|\.)?\s*(?:no|#)|description|item|particulars?|"
+        r"product|service|qty|quantity|rate|amount|price)",
+        re.IGNORECASE,
+    )
+
+    _CURRENCY_LABELS = {
+        "INR": r"₹|Rs\.?|INR|Indian\s+Rupee",
+        "USD": r"\$\s*\d|USD|US\s*\$|US\s*Dollar",
+        "EUR": r"€|EUR|Euro",
+        "GBP": r"£|GBP|Pounds?",
     }
 
     @staticmethod
-    def extract(text: str, field: str) -> Optional[str]:
-        for pattern in InvoiceParser.PATTERNS.get(field, []):
-            match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
-            if match:
-                return match.group(1).strip()
+    def _lines(text: str) -> list:
+        return text.replace("\r", "\n").split("\n")
+
+    @staticmethod
+    def _fix_line(line: str) -> str:
+        return re.sub(r"\s+", " ", line.strip())
+
+    @classmethod
+    def _amount_on_line(cls, line: str):
+        """Return (label_before_number, amount) for lines such as
+        'Subtotal 1,100.00' or 'Amount Payable:  ₹ 1,230.50'."""
+        line = cls._fix_line(line)
+        m = re.search(r"(" + _AMOUNT_RE + r")", line)
+        if not m:
+            return None, None
+        number = m.group(1)
+        value = cls.parse_amount(number)
+        idx = m.start()
+        label = line[:idx].strip().rstrip(":.-₹$€£")
+        return label.strip(), value
+
+    @classmethod
+    def _find_amount(cls, lines: list, labels: list) -> float:
+        """Find the first line containing one of `labels` and read its amount."""
+        rx = re.compile(
+            r"(?:^|(?<=[\s:;.-]))(?:"
+            + "|".join(re.escape(l) for l in labels)
+            + r")\b",
+            re.IGNORECASE,
+        )
+        for raw in lines:
+            line = cls._fix_line(raw)
+            if not line or not rx.search(line):
+                continue
+            _, value = cls._amount_on_line(line)
+            if value is not None:
+                return value
+        # fallback: scan the whole text for label followed by an amount
+        for raw in lines:
+            line = cls._fix_line(raw)
+            m = re.search(
+                r"(?:" + "|".join(re.escape(l) for l in labels) + r")[^\d]*(" + _AMOUNT_RE + r")",
+                line,
+                re.IGNORECASE,
+            )
+            if m:
+                return cls.parse_amount(m.group(1))
+        return 0.0
+
+    @classmethod
+    def _extract_with_context(cls, lines: list, labels: list) -> Optional[str]:
+        rx = re.compile(
+            r"(?:^|(?<=[\s:;.-]))(?:"
+            + "|".join(re.escape(l) for l in labels)
+            + r")\b",
+            re.IGNORECASE,
+        )
+        for raw in lines:
+            line = cls._fix_line(raw)
+            if rx.search(line):
+                value = re.split(rx, line)[-1].strip().lstrip(":-. \t#")
+                if value:
+                    return value
         return None
+
+    @staticmethod
+    def _looks_like_date(value: str) -> bool:
+        return bool(re.search(
+            r"\d{1,4}[./-]\d{1,4}[./-]\d{1,4}|"
+            r"\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*\.?\s+\d{2,4}|"
+            r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{2,4}|"
+            r"\d{1,2}[-/](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*[-/]\d{2,4}",
+            value,
+            re.IGNORECASE,
+        ))
 
     @staticmethod
     def parse_amount(s: Optional[str]) -> float:
         if not s:
             return 0.0
-        cleaned = re.sub(r'[^\d.]', '', s)
+        s = s.replace(",", "")
+        m = re.search(r"-?\d+(?:\.\d+)?", s)
+        if not m:
+            return 0.0
         try:
-            return float(cleaned)
+            return float(m.group(0))
         except ValueError:
             return 0.0
 
     @staticmethod
+    def _normalize_date(value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
+        value = value.strip().strip(".,;").replace("  ", " ")
+        if len(value) > 30:
+            value = value[:30]
+        formats = [
+            "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y", "%d-%m-%y", "%d/%m/%y",
+            "%m-%d-%Y", "%m/%d/%Y", "%m.%d.%Y", "%Y-%m-%d", "%Y/%m/%d",
+            "%d %b %Y", "%d-%b-%Y", "%d/%b/%Y", "%d %B %Y", "%d-%B-%Y",
+            "%b %d, %Y", "%B %d, %Y", "%b %d %Y", "%B %d %Y",
+        ]
+        for fmt in formats:
+            try:
+                return datetime.strptime(value, fmt).strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        # Try swapping ambiguous dd/mm with mm/dd when one side > 12
+        m = re.match(r"^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$", value)
+        if m:
+            a, b, y = int(m.group(1)), int(m.group(2)), m.group(3)
+            if len(y) == 2:
+                y = "20" + y if int(y) < 70 else "19" + y
+            if b > 12 and a <= 12:  # dd/mm
+                try:
+                    return datetime.strptime(f"{y}-{b:02d}-{a:02d}", "%Y-%m-%d").strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
+        # Try textual month names with hyphens/slashes, e.g. 20-Aug-2026
+        m = re.match(r"^(\d{1,2})[-/. ]([A-Za-z]{3,9})[-/. ](\d{2,4})$", value)
+        if m:
+            day = int(m.group(1))
+            mon = _MONTHS.get(m.group(2)[:3].lower())
+            year = int(m.group(3))
+            if year < 100:
+                year += 2000 if year < 70 else 1900
+            if mon:
+                try:
+                    return datetime(year, mon, day).strftime("%Y-%m-%d")
+                except ValueError:
+                    return None
+        return None
+
+    @classmethod
+    def extract_date(cls, text: str, labels: list, allow_fallback: bool = True) -> Optional[str]:
+        lines = cls._lines(text)
+        date_label = cls._extract_with_context(lines, labels)
+        if date_label:
+            # If the context value itself is already a date (e.g. 19-Sep-2026).
+            if cls._looks_like_date(date_label):
+                m = re.search(
+                    r"\d{1,4}[./-]\d{1,4}[./-]\d{1,4}|"
+                    r"\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*\.?\s+\d{2,4}|"
+                    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{2,4}|"
+                    r"\d{1,2}[-/](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*[-/]\d{2,4}",
+                    date_label,
+                    re.IGNORECASE,
+                )
+                if m:
+                    return cls._normalize_date(m.group(0))
+        if not allow_fallback:
+            return None
+        # Fallback: find any date in the document (useful when label is missing)
+        for raw in lines:
+            line = cls._fix_line(raw)
+            if len(line) < 5:
+                continue
+            m = re.search(
+                r"\d{1,4}[./-]\d{1,4}[./-]\d{1,4}|"
+                r"\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*\.?\s+\d{2,4}|"
+                r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{2,4}|"
+                r"\d{1,2}[-/](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*[-/]\d{2,4}",
+                line,
+                re.IGNORECASE,
+            )
+            if m:
+                return cls._normalize_date(m.group(0))
+        return None
+
+    @classmethod
+    def extract_invoice_number(cls, text: str) -> Optional[str]:
+        # Always avoid matching a label word as the invoice number.
+        blacklist = {"invoice", "inv", "bill", "receipt", "voucher", "date",
+                     "total", "amount", "due", "no", "number", "tax", "gst"}
+        patterns = [
+            # Invoice No: X / Invoice # X / Bill No X / Receipt No X
+            r"(?:invoice|bill|receipt|voucher|transaction)\s*(?:no|number|#)\s*[:\-.#]?\s*([A-Z0-9][A-Z0-9\-/_]{2,40})",
+            # Invoice: X / Invoice X where a separator makes it unambiguous
+            r"(?:invoice|bill|receipt)\s*[:\-#]\s*([A-Z0-9][A-Z0-9\-/_]{2,40})",
+            # #12345 / INV-12345 / No. 12345
+            r"(?:#|(?:^|[\s:(])(?:inv|invoice|bill|receipt|no)\s*[.\-#:]?\s*)([A-Z0-9][A-Z0-9\-/_]{2,40})",
+            # TPS/2026/AUG/0045 etc.
+            r"\b([A-Z]{2,6}[-/][0-9]{2,6}(?:[-/][0-9]{2,6})+(?:[-/][A-Z]{1,5})?)\b",
+        ]
+        for pat in patterns:
+            m = re.search(pat, text, re.IGNORECASE | re.MULTILINE)
+            if m:
+                candidate = m.group(1).strip()
+                if candidate.lower() not in blacklist and re.search(r"\d", candidate):
+                    return candidate
+        return None
+
+    @classmethod
+    def extract_vendor(cls, text: str) -> str:
+        lines = cls._lines(text)
+        for raw in lines:
+            line = cls._fix_line(raw)
+            m = re.search(
+                r"(?:from|seller|vendor|company|business|issued\s*by|billed\s*by|supplier|"
+                r"bill\s*from)\s*[:\-.]?\s*(.+)",
+                line,
+                re.IGNORECASE,
+            )
+            if m:
+                candidate = m.group(1).strip()
+                if len(candidate) >= 3 and re.search(r"[A-Za-z]", candidate):
+                    return candidate[:80]
+        strong = re.compile(
+            r"(?:Pvt|Private|Ltd|Limited|LLC|Inc|Corp|S\.A|Solutions|Enterprises|Ventures|"
+            r"Services|Industries|Traders|Trading|Works|Technologies|Tech|Energy|Power|"
+            r"Print|Mart|Shop|Store|Hotel|Hospital|Clinic|Pharmacy|Associates|&)",
+            re.IGNORECASE,
+        )
+        header_label = re.compile(
+            r"(^|\s)(invoice|bill|receipt|tax\s*invoice|quotation|estimate|statement|"
+            r"payment|date|due|total|subtotal|amount|thank|gstin|address|phone|email)"
+            r"(\b|$)",
+            re.IGNORECASE,
+        )
+        customer_label = re.compile(
+            r"(^|\s)(bill\s*to|billed\s*to|ship\s*to|shipped\s*to|customer|client|"
+            r"consignee|recipient|attn|attention)(\b|$)",
+            re.IGNORECASE,
+        )
+        for raw in lines[:15]:
+            line = cls._fix_line(raw)
+            if not line or header_label.search(line) or customer_label.search(line):
+                continue
+            if re.fullmatch(r"[^0-9@]*[A-Za-z][A-Za-z0-9 &'.,()\-]{2,60}", line):
+                if strong.search(line) or re.search(r"[A-Z]{2,}", line):
+                    return line[:80]
+        for raw in lines[:6]:
+            line = cls._fix_line(raw)
+            if (line and re.search(r"[A-Za-z]{2,}", line) and len(line) <= 60
+                    and not header_label.search(line) and not customer_label.search(line)):
+                return line[:80]
+        return "Unknown Vendor"
+
+    @staticmethod
     def detect_currency(text: str) -> str:
-        if re.search(r'₹|Rs\.?|INR', text, re.IGNORECASE):
-            return "INR"
-        if re.search(r'\$\s*\d|USD', text, re.IGNORECASE):
-            return "USD"
-        if re.search(r'€|EUR', text):
-            return "EUR"
-        if re.search(r'£|GBP', text):
-            return "GBP"
+        for code, pattern in InvoiceParser._CURRENCY_LABELS.items():
+            if re.search(pattern, text, re.IGNORECASE):
+                return code
         return "INR"
 
     @staticmethod
-    def parse_line_items(text: str) -> list:
+    def _extract_tax_breakdown(text: str) -> tuple:
+        """Return (tax_amount, tax_rate) by scanning GST/CGST/SGST/VAT lines."""
+        lines = InvoiceParser._lines(text)
+        total_tax = 0.0
+        rates = []
+        rate_only = []
+        for raw in lines:
+            line = InvoiceParser._fix_line(raw)
+            m = re.search(
+                r"(?:(?:cgst|sgst|igst|gst|vat)|(?:tax)\s*\()[^:]{0,18}?"
+                r"(?P<rate>\d+(?:\.\d+)?)\s*%[^\d]*(?P<amt>" + _AMOUNT_RE + r")?",
+                line,
+                re.IGNORECASE,
+            )
+            if m:
+                rate = float(m.group("rate"))
+                amt = InvoiceParser.parse_amount(m.group("amt"))
+                if amt and amt > 0:
+                    total_tax += amt
+                    if rate > 0:
+                        rates.append(rate)
+                elif rate > 0:
+                    rates.append(rate)
+                    rate_only.append(rate)
+                continue
+            m = re.search(r"(?:tax|gst|vat)\s*\(?(\d+(?:\.\d+)?)%\)?\s*[:#.-]?\s*(" + _AMOUNT_RE + r")?", line, re.IGNORECASE)
+            if m:
+                rate = float(m.group(1))
+                amt = InvoiceParser.parse_amount(m.group(2))
+                if amt:
+                    total_tax += amt
+                    if rate:
+                        rates.append(rate)
+                else:
+                    rate_only.append(rate)
+                continue
+            m = re.search(r"(?:tax\s*amount|total\s*tax|total\s*vat|vat)\s*[:\-]?\s*(" + _AMOUNT_RE + r")", line, re.IGNORECASE)
+            if m:
+                total_tax += InvoiceParser.parse_amount(m.group(1))
+
+        if rates:
+            rate = sum(rates)
+        elif rate_only:
+            rate = sum(rate_only)
+        else:
+            rate = 0.0
+        return round(total_tax, 2), rate
+
+    @classmethod
+    def parse_line_items(cls, text: str) -> list:
         items = []
-        lines = text.strip().split('\n')
+        lines = [cls._fix_line(l) for l in cls._lines(text)]
         in_section = False
         for line in lines:
-            line = line.strip()
-            if not line or len(line) < 3:
+            if not line or len(line) < 4:
                 continue
-            if re.match(r'^(description|item|particular|s\.?no|qty|rate|amount|sr)', line, re.IGNORECASE):
+            # A summary/totals line always ends the item table first.
+            if cls._SUMMARY_RE.match(line):
+                break
+            if cls._ITEM_HEADER_RE.match(line):
                 in_section = True
                 continue
-            if in_section:
-                numbers = re.findall(r'[\d,]+\.?\d*', line)
-                if numbers and len(line) > 5:
-                    name = re.split(r'\d', line)[0].strip()
-                    if name and len(name) > 2:
-                        items.append({"description": name[:80], "amount": InvoiceParser.parse_amount(numbers[-1])})
-                if len(items) > 15:
-                    break
-        return items[:10]
+            if not in_section and not cls._ITEM_HEADER_RE.search(line):
+                continue
+            amount_match = list(re.finditer(r"(" + _AMOUNT_RE + r")", line))
+            if amount_match:
+                last = amount_match[-1]
+                amount = cls.parse_amount(last.group(1))
+                # Description = everything before the final amount column.
+                desc = line[:last.start()]
+                desc = re.sub(r"\s+", " ", desc).strip(" |:.-")
+                # Remove qty/rate columns trailing the description, e.g.
+                # "Consulting 4 150.00" -> "Consulting".
+                parts = desc.split()
+                while parts and (
+                    re.fullmatch(r"\d[\d,]*\.?\d*", parts[-1])
+                    or parts[-1].lower() in ("qty", "qty.", "rate", "&", "@", "x", "x1")
+                ):
+                    parts.pop()
+                desc = " ".join(parts).strip(" |:.-")
+                if len(desc) >= 2 and amount > 0 and not cls._SUMMARY_RE.match(desc):
+                    items.append({"description": desc[:80], "amount": amount})
+        return items[:15]
 
-    @staticmethod
-    def parse(raw_text: str) -> dict:
+    @classmethod
+    def parse(cls, raw_text: str) -> dict:
+        lines = cls._lines(raw_text)
         result = {}
-        result['invoice_number'] = InvoiceParser.extract(raw_text, 'invoice_number') or f"INV-{uuid.uuid4().hex[:6].upper()}"
-        result['invoice_date'] = InvoiceParser.extract(raw_text, 'date')
-        result['due_date'] = InvoiceParser.extract(raw_text, 'due_date')
-        result['vendor_name'] = InvoiceParser.extract(raw_text, 'vendor') or "Unknown Vendor"
-        result['currency'] = InvoiceParser.detect_currency(raw_text)
-        result['total_amount'] = InvoiceParser.parse_amount(InvoiceParser.extract(raw_text, 'total'))
-        result['subtotal'] = InvoiceParser.parse_amount(InvoiceParser.extract(raw_text, 'subtotal'))
-        result['tax_amount'] = InvoiceParser.parse_amount(InvoiceParser.extract(raw_text, 'tax'))
-        result['tax_rate'] = InvoiceParser.parse_amount(InvoiceParser.extract(raw_text, 'tax_rate'))
 
-        # Calculate missing
-        if result['subtotal'] > 0 and result['total_amount'] == 0:
-            result['total_amount'] = result['subtotal'] + result['tax_amount']
-        if result['total_amount'] > 0 and result['subtotal'] == 0 and result['tax_amount'] > 0:
-            result['subtotal'] = result['total_amount'] - result['tax_amount']
+        result['invoice_number'] = (
+            cls.extract_invoice_number(raw_text) or f"INV-{uuid.uuid4().hex[:6].upper()}"
+        )
+        result['invoice_date'] = cls.extract_date(
+            raw_text, ["invoice date", "invoice dated", "bill date", "receipt date",
+                       "date of issue", "dated", "date"]
+        )
+        result['due_date'] = cls.extract_date(
+            raw_text, ["due date", "payment due", "pay by", "due by", "net due"],
+            allow_fallback=False,
+        )
+        result['vendor_name'] = cls.extract_vendor(raw_text)
+        result['currency'] = cls.detect_currency(raw_text)
+
+        result['total_amount'] = cls._find_amount(
+            lines,
+            ["grand total", "total due", "amount due", "amount payable", "total payable",
+             "net payable", "total amount", "invoice total", "balance due", "total"],
+        )
+        result['subtotal'] = cls._find_amount(
+            lines,
+            ["sub total", "subtotal", "taxable value", "taxable amount",
+             "net amount", "amount before tax"],
+        )
+        tax_amount, tax_rate = cls._extract_tax_breakdown(raw_text)
+        result['tax_amount'] = tax_amount
+        result['tax_rate'] = tax_rate
+        result['category'] = "Uncategorized"
+
+        if result['subtotal'] <= 0 and result['total_amount'] > 0 and result['tax_amount'] > 0:
+            result['subtotal'] = round(result['total_amount'] - result['tax_amount'], 2)
+        if result['total_amount'] <= 0:
+            if result['subtotal'] > 0:
+                result['total_amount'] = round(result['subtotal'] + result['tax_amount'], 2)
+            elif result['tax_amount'] > 0:
+                result['total_amount'] = round(result['tax_amount'], 2)
         if result['tax_rate'] == 0 and result['subtotal'] > 0 and result['tax_amount'] > 0:
             result['tax_rate'] = round((result['tax_amount'] / result['subtotal']) * 100, 2)
 
-        # Convert to INR
-        rate = EXCHANGE_RATES_TO_INR.get(result['currency'], 1.0)
-        result['total_inr'] = round(result['total_amount'] * rate, 2)
+        if result['total_amount'] > 0:
+            rate = EXCHANGE_RATES_TO_INR.get(result['currency'], 1.0)
+            result['total_inr'] = round(result['total_amount'] * rate, 2)
+        else:
+            result['total_inr'] = 0
 
-        # Line items
-        result['line_items'] = InvoiceParser.parse_line_items(raw_text)
+        result['line_items'] = cls.parse_line_items(raw_text)
 
-        # Confidence
         found = sum(1 for k in ['invoice_number', 'invoice_date', 'vendor_name', 'total_amount']
                     if result.get(k) and result[k] not in [None, 0, '', 'Unknown Vendor'])
         result['confidence_score'] = round((found / 4) * 100)
-
         return result
 
 
@@ -669,18 +962,18 @@ async def scan_invoice(file: UploadFile = File(...), request: Request = None):
         insert_sql_pg = """
             INSERT INTO invoices (
                 id, user_id, filename, original_name, vendor_name, invoice_number,
-                invoice_date, subtotal, tax_amount, tax_rate, total_amount,
+                invoice_date, due_date, subtotal, tax_amount, tax_rate, total_amount,
                 currency, total_inr, category, payment_status, raw_text,
                 line_items, confidence_score
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """
         insert_sql_lite = """
             INSERT INTO invoices (
                 id, user_id, filename, original_name, vendor_name, invoice_number,
-                invoice_date, subtotal, tax_amount, tax_rate, total_amount,
+                invoice_date, due_date, subtotal, tax_amount, tax_rate, total_amount,
                 currency, total_inr, category, payment_status, raw_text,
                 line_items, confidence_score
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """
         
         values = (
@@ -691,6 +984,7 @@ async def scan_invoice(file: UploadFile = File(...), request: Request = None):
             parsed.get('vendor_name', 'Unknown'),
             parsed.get('invoice_number', ''),
             parsed.get('invoice_date'),
+            parsed.get('due_date'),
             parsed.get('subtotal', 0),
             parsed.get('tax_amount', 0),
             parsed.get('tax_rate', 0),
@@ -721,6 +1015,7 @@ async def scan_invoice(file: UploadFile = File(...), request: Request = None):
                 "vendor_name": parsed['vendor_name'],
                 "invoice_number": parsed['invoice_number'],
                 "invoice_date": parsed.get('invoice_date'),
+                "due_date": parsed.get('due_date'),
                 "subtotal": parsed.get('subtotal', 0),
                 "tax_amount": parsed.get('tax_amount', 0),
                 "tax_rate": parsed.get('tax_rate', 0),
@@ -730,6 +1025,7 @@ async def scan_invoice(file: UploadFile = File(...), request: Request = None):
                 "category": parsed.get('category', 'Uncategorized'),
                 "confidence_score": parsed.get('confidence_score', 75),
                 "line_items": parsed.get('line_items', []),
+                "raw_text": (raw_text or "")[:2000],
             },
             "is_demo": is_demo,
             "message": "Invoice scanned successfully!" if not is_demo
