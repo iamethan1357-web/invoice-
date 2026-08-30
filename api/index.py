@@ -36,7 +36,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 OCR_SPACE_API_KEY = os.environ.get("OCR_SPACE_API_KEY", "")
 CLERK_PUBLISHABLE_KEY = os.environ.get("CLERK_PUBLISHABLE_KEY", "")
 CLERK_SECRET_KEY = os.environ.get("CLERK_SECRET_KEY", "")
-AUTH_ENABLED = bool(CLERK_SECRET_KEY)  # Auth only if secret key is set
+AUTH_ENABLED = bool(CLERK_SECRET_KEY) and bool(CLERK_PUBLISHABLE_KEY)  # Need both keys
 USE_SQLITE_FALLBACK = not DATABASE_URL  # Auto-use SQLite locally if no Neon URL
 
 # Optional AI-powered categorization. Add AI_API_KEY (or OPENAI_API_KEY) to
@@ -167,6 +167,25 @@ def get_current_user(request: Request) -> Optional[str]:
     if not user_info or not user_info.get("user_id"):
         raise HTTPException(status_code=401, detail="Invalid user")
     
+    return user_info["user_id"]
+
+
+def get_optional_current_user(request: Request) -> Optional[str]:
+    """Like get_current_user, but allows anonymous requests.
+
+    Used for scanning, pasting OCR text, template browsing/generation and
+    other actions that can be performed before signing in. Presents an invalid
+    token as a 401, but treats a missing header as anonymous.
+    """
+    if not AUTH_ENABLED:
+        return None
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None  # anonymous
+    token = auth_header.split(" ")[1]
+    user_info = clerk_auth.verify_token(token)
+    if not user_info or not user_info.get("user_id"):
+        raise HTTPException(status_code=401, detail="Invalid user")
     return user_info["user_id"]
 
 
@@ -1322,7 +1341,7 @@ async def auth_config():
 @app.post("/api/scan/text")
 async def scan_text(request: Request):
     """Extract invoice fields directly from pasted OCR text (debug/testing)."""
-    user_id = get_current_user(request)
+    user_id = get_optional_current_user(request)
     body = await request.json()
     raw_text = (body.get("text") or "").strip()
     if len(raw_text) < 10:
@@ -1393,7 +1412,7 @@ async def scan_text(request: Request):
 @app.post("/api/scan")
 async def scan_invoice(file: UploadFile = File(...), request: Request = None):
     """Upload and scan an invoice/receipt."""
-    user_id = get_current_user(request) if request else None
+    user_id = get_optional_current_user(request) if request else None
     try:
         content = await file.read()
         filename = file.filename or "unknown.jpg"
@@ -1646,7 +1665,7 @@ def _insert_template_record(conn, template_id: str, user_id, body: dict) -> dict
 @app.get("/api/templates")
 async def list_templates(request: Request):
     """List saved invoice templates (user templates plus the built-in default)."""
-    user_id = get_current_user(request)
+    user_id = get_optional_current_user(request)
     conn = get_db_connection()
     if USE_SQLITE_FALLBACK:
         if user_id:
@@ -1676,7 +1695,7 @@ async def list_templates(request: Request):
 @app.post("/api/templates")
 async def create_template(request: Request):
     """Create an invoice template."""
-    user_id = get_current_user(request)
+    user_id = get_optional_current_user(request)
     body = await request.json()
     template_id = str(uuid.uuid4())
     line_items = body.get("line_items") or []
@@ -1740,7 +1759,7 @@ async def create_template(request: Request):
 
 @app.get("/api/templates/{template_id}")
 async def get_template(template_id: str, request: Request):
-    user_id = get_current_user(request)
+    user_id = get_optional_current_user(request)
     conn = get_db_connection()
     row = _fetch_template(conn, template_id, user_id)
     conn.close()
@@ -1751,7 +1770,7 @@ async def get_template(template_id: str, request: Request):
 @app.put("/api/templates/{template_id}")
 async def update_template(template_id: str, request: Request):
     """Update an invoice template."""
-    user_id = get_current_user(request)
+    user_id = get_optional_current_user(request)
     body = await request.json()
     conn = get_db_connection()
     row = _fetch_template(conn, template_id, user_id)
@@ -1809,7 +1828,7 @@ async def update_template(template_id: str, request: Request):
 @app.delete("/api/templates/{template_id}")
 async def delete_template(template_id: str, request: Request):
     """Delete a user template. Built-in defaults cannot be deleted."""
-    user_id = get_current_user(request)
+    user_id = get_optional_current_user(request)
     conn = get_db_connection()
     row = _fetch_template(conn, template_id, user_id)
     if row.get("is_builtin"):
@@ -2090,7 +2109,7 @@ def _render_invoice_html(data: dict) -> str:
 @app.post("/api/invoices/generate")
 async def generate_invoice(request: Request):
     """Generate (and optionally save) an invoice from a template + form data."""
-    user_id = get_current_user(request)
+    user_id = get_optional_current_user(request)
     body = await request.json()
     template = None
     template_id = body.get("template_id") or ""
