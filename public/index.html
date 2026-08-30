@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice Scanner Pro — Smart Invoice Processing</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234f46e5'/><path d='M8 10h16M8 16h12M8 22h8' stroke='white' stroke-width='2.5' stroke-linecap='round'/></svg>">
+    <style>
+        /* Inline critical fallback — ensures design loads even if external CSS is delayed */
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;background:#09090b;color:#fafafa;min-height:100vh}
+        .page{padding:32px;animation:pageEnter .4s cubic-bezier(.16,1,.3,1)}
+        .page.active{display:block}
+        @keyframes pageEnter{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes cardEnter{from{opacity:0;transform:translateY(16px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+        @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+        .stat-card{animation:cardEnter .4s cubic-bezier(.16,1,.3,1) backwards}
+    </style>
+</head>
+<body>
+    <!-- ═══ Sidebar ═══ -->
+    <div id="app" style="display:flex;width:100%;">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                </div>
+                <span class="logo-text">InvoicePro</span>
+            </div>
+        </div>
+        <nav class="sidebar-nav">
+            <div class="nav-section-label">Main</div>
+            <a href="#" class="nav-item active" data-page="dashboard" onclick="showPage('dashboard')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                Dashboard
+            </a>
+            <a href="#" class="nav-item" data-page="scan" onclick="showPage('scan')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                Scan Invoice
+                <span class="nav-badge" id="scanBadge">NEW</span>
+            </a>
+            <a href="#" class="nav-item" data-page="invoices" onclick="showPage('invoices')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                All Invoices
+            </a>
+            <div class="nav-section-label">Insights</div>
+            <a href="#" class="nav-item" data-page="analytics" onclick="showPage('analytics')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                Analytics
+            </a>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="status-indicator" id="statusIndicator">
+                <span class="status-dot green"></span>
+                <span id="statusText">System online</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ═══ Main Content ═══ -->
+    <main class="main-content">
+        <header class="top-bar">
+            <button class="menu-toggle" onclick="toggleSidebar()">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            </button>
+            <div class="top-bar-right">
+                <button class="btn-icon" onclick="exportCSV()" title="Export CSV">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                </button>
+                <button class="btn-icon" onclick="showPage('scan')" title="New scan">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
+                <div class="user-avatar">JP</div>
+            </div>
+        </header>
+
+        <!-- ═══ Dashboard ═══ -->
+        <div class="page active" id="page-dashboard">
+            <div class="page-header">
+                <h1>Dashboard</h1>
+                <p class="page-subtitle">Your invoice activity at a glance</p>
+            </div>
+            <div class="stats-grid" id="statsGrid">
+                <div class="stat-card"><div class="stat-card-inner"><div class="stat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><div class="stat-body"><span class="stat-value" id="statTotal">—</span><span class="stat-label">Total Invoices</span></div></div></div>
+                <div class="stat-card"><div class="stat-card-inner"><div class="stat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="stat-body"><span class="stat-value" id="statAmount">—</span><span class="stat-label">Total Amount (INR)</span></div></div></div>
+                <div class="stat-card"><div class="stat-card-inner"><div class="stat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div><div class="stat-body"><span class="stat-value" id="statPending">—</span><span class="stat-label">Pending Payment</span></div></div></div>
+                <div class="stat-card"><div class="stat-card-inner"><div class="stat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div><div class="stat-body"><span class="stat-value" id="statPaid">—</span><span class="stat-label">Paid Amount</span></div></div></div>
+            </div>
+            <div class="dashboard-grid">
+                <div class="card">
+                    <div class="card-header"><h3>Recent Invoices</h3><a href="#" onclick="showPage('invoices')" class="card-link">View all →</a></div>
+                    <div class="card-body" id="recentInvoices"><div class="loading"><div class="skeleton" style="height:48px;margin:4px 0"></div><div class="skeleton" style="height:48px;margin:4px 0"></div><div class="skeleton" style="height:48px;margin:4px 0"></div></div></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3>Spending by Category</h3></div>
+                    <div class="card-body" id="categoryBreakdown"><div class="loading"><div class="skeleton" style="height:36px;margin:6px 0"></div><div class="skeleton" style="height:36px;margin:6px 0"></div><div class="skeleton" style="height:36px;margin:6px 0"></div></div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ Scan Page ═══ -->
+        <div class="page" id="page-scan">
+            <div class="page-header">
+                <h1>Scan Invoice</h1>
+                <p class="page-subtitle">Upload an invoice or receipt to extract data automatically</p>
+            </div>
+            <div class="scan-container">
+                <!-- Upload Zone -->
+                <div class="upload-zone" id="uploadZone">
+                    <div class="upload-icon">
+                        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    </div>
+                    <h3>Drop your invoice here</h3>
+                    <p>or click to browse files</p>
+                    <span class="upload-formats">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/></svg>
+                        JPG, PNG, PDF up to 10MB
+                    </span>
+                    <input type="file" id="fileInput" accept="image/*,.pdf" hidden>
+                </div>
+
+                <!-- Processing -->
+                <div class="processing" id="processing" style="display:none;">
+                    <div class="scan-animation">
+                        <div class="scan-ring"></div>
+                        <div class="scan-ring"></div>
+                    </div>
+                    <p style="font-size:15px;font-weight:600;margin-bottom:4px;">Scanning your document</p>
+                    <p style="font-size:12px;color:var(--text-muted);">This usually takes a few seconds</p>
+                    <div class="scan-steps">
+                        <div class="scan-step" id="step1"><span class="scan-step-dot"></span> Analyzing document layout</div>
+                        <div class="scan-step" id="step2"><span class="scan-step-dot"></span> Extracting text with OCR</div>
+                        <div class="scan-step" id="step3"><span class="scan-step-dot"></span> Identifying invoice fields</div>
+                        <div class="scan-step" id="step4"><span class="scan-step-dot"></span> Calculating totals & taxes</div>
+                    </div>
+                </div>
+
+                <!-- Result -->
+                <div class="scan-result" id="scanResult" style="display:none;">
+                    <div class="result-header">
+                        <div class="result-badge success">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                            Extracted successfully
+                        </div>
+                        <div class="confidence-meter">
+                            <span class="confidence-label">Confidence</span>
+                            <div class="confidence-bar"><div class="confidence-fill" id="confidenceFill"></div></div>
+                            <span class="confidence-value" id="confidenceValue">0%</span>
+                        </div>
+                    </div>
+                    <div class="data-grid">
+                        <div class="data-item"><label>Vendor</label><span id="resVendor">—</span></div>
+                        <div class="data-item"><label>Invoice #</label><span id="resInvoiceNo">—</span></div>
+                        <div class="data-item"><label>Date</label><span id="resDate">—</span></div>
+                        <div class="data-item"><label>Currency</label><span id="resCurrency">—</span></div>
+                        <div class="data-item"><label>Subtotal</label><span id="resSubtotal">—</span></div>
+                        <div class="data-item"><label>Tax Rate</label><span id="resTaxRate">—</span></div>
+                        <div class="data-item"><label>Tax Amount</label><span id="resTaxAmount">—</span></div>
+                        <div class="data-item highlight"><label>Total Amount</label><span id="resTotal">—</span></div>
+                        <div class="data-item"><label>Total (INR)</label><span id="resTotalINR">—</span></div>
+                        <div class="data-item"><label>Category</label><span id="resCategory">—</span></div>
+                    </div>
+                    <div class="line-items-section" id="lineItemsSection" style="display:none;">
+                        <h4>Line Items</h4>
+                        <table class="line-items-table"><thead><tr><th>Description</th><th>Amount</th></tr></thead><tbody id="lineItemsBody"></tbody></table>
+                    </div>
+                    <div id="demoNotice" class="demo-notice" style="display:none;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        Demo mode — add <code>OCR_SPACE_API_KEY</code> for real extraction
+                    </div>
+                    <div class="result-actions">
+                        <button class="btn btn-primary" onclick="showPage('invoices')">View in Dashboard</button>
+                        <button class="btn btn-secondary" onclick="resetScan()">Scan Another</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ Invoices Page ═══ -->
+        <div class="page" id="page-invoices">
+            <div class="page-header">
+                <h1>All Invoices</h1>
+                <p class="page-subtitle">Manage and review all scanned invoices</p>
+            </div>
+            <div class="filters-bar">
+                <div class="search-box">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="text" placeholder="Search by vendor or invoice #..." id="searchInput" onkeyup="debounceSearch()">
+                </div>
+                <select class="filter-select" id="categoryFilter" onchange="currentPage=1;loadInvoices()"><option value="">All Categories</option></select>
+                <select class="filter-select" id="statusFilter" onchange="currentPage=1;loadInvoices()"><option value="">All Status</option><option value="Paid">Paid</option><option value="Pending">Pending</option></select>
+            </div>
+            <div class="table-container">
+                <table class="invoice-table">
+                    <thead><tr>
+                        <th onclick="sortBy('invoice_number')">Invoice ↕</th>
+                        <th onclick="sortBy('vendor_name')">Vendor ↕</th>
+                        <th onclick="sortBy('invoice_date')">Date ↕</th>
+                        <th onclick="sortBy('total_amount')">Amount ↕</th>
+                        <th>INR Total</th>
+                        <th>Category</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr></thead>
+                    <tbody id="invoiceTableBody"><tr><td colspan="8" class="loading"><div class="skeleton" style="height:32px;margin:8px 0"></div><div class="skeleton" style="height:32px;margin:8px 0"></div><div class="skeleton" style="height:32px;margin:8px 0"></div></td></tr></tbody>
+                </table>
+            </div>
+            <div class="pagination" id="pagination"></div>
+        </div>
+
+        <!-- ═══ Analytics Page ═══ -->
+        <div class="page" id="page-analytics">
+            <div class="page-header">
+                <h1>Analytics</h1>
+                <p class="page-subtitle">Spending trends and insights from your invoices</p>
+            </div>
+            <div class="analytics-grid">
+                <div class="card full-width">
+                    <div class="card-header"><h3>Monthly Spending</h3></div>
+                    <div class="card-body"><div class="bar-chart" id="monthlyChart"><div class="loading">Loading chart data...</div></div></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3>By Category</h3></div>
+                    <div class="card-body" id="categoryChart"><div class="loading">Loading...</div></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3>Top Vendors</h3></div>
+                    <div class="card-body" id="topVendors"><div class="loading">Loading...</div></div>
+                </div>
+                <div class="card full-width">
+                    <div class="card-header"><h3>Overview</h3></div>
+                    <div class="card-body"><div class="quick-stats" id="quickStats"><div class="loading">Loading...</div></div></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- ═══ Modal ═══ -->
+    <div class="modal-overlay" id="modalOverlay" onclick="closeModal()">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header"><h2 id="modalTitle">Invoice Details</h2><button class="modal-close" onclick="closeModal()">✕</button></div>
+            <div class="modal-body" id="modalBody"><div class="loading">Loading...</div></div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary btn-sm" onclick="closeModal()">Close</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteInvoice()">Delete</button>
+            </div>
+        </div>
+    </div>
+    </div><!-- end #app -->
+
+    <div class="toast" id="toast"></div>
+    
+    <!-- ═══ Clerk Auth (loaded conditionally) ═══ -->
+    <div id="authScreen" style="display:none;">
+        <div class="auth-container" id="clerkMount"></div>
+    </div>
+    
+    <script>
+        // Auth initialization — checks if Clerk is enabled and shows login if needed
+        (async function initAuth() {
+            try {
+                const res = await fetch('/api/auth/config');
+                const config = await res.json();
+                
+                if (config.enabled && config.publishable_key) {
+                    // Load Clerk JS dynamically
+                    const script = document.createElement('script');
+                    script.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
+                    script.onload = async function() {
+                        await window.Clerk.load();
+                        
+                        if (window.Clerk.user) {
+                            // User is signed in — show app
+                            document.getElementById('authScreen').style.display = 'none';
+                            document.getElementById('app').style.display = 'flex';
+                            // Load app
+                            if (typeof checkHealth === 'function') checkHealth();
+                            if (typeof loadDashboard === 'function') loadDashboard();
+                            if (typeof setupUploadZone === 'function') setupUploadZone();
+                        } else {
+                            // Show login
+                            document.getElementById('authScreen').style.display = 'flex';
+                            document.getElementById('app').style.display = 'none';
+                            // Mount Clerk sign-in component
+                            window.Clerk.mountSignIn(document.getElementById('clerkMount'), {
+                                signUpUrl: '/?sign_up=true',
+                                afterSignInUrl: window.location.origin,
+                            });
+                        }
+                        
+                        // Listen for auth changes
+                        window.Clerk.addListener((payload) => {
+                            if (payload.user) {
+                                document.getElementById('authScreen').style.display = 'none';
+                                document.getElementById('app').style.display = 'flex';
+                                if (typeof loadDashboard === 'function') loadDashboard();
+                            } else {
+                                document.getElementById('authScreen').style.display = 'flex';
+                                document.getElementById('app').style.display = 'none';
+                            }
+                        });
+                    };
+                    document.head.appendChild(script);
+                    
+                    // Initialize Clerk with publishable key
+                    window.Clerk = new window.clerk.Clerk(config.publishable_key);
+                } else {
+                    // No auth — show app directly
+                    document.getElementById('app').style.display = 'flex';
+                    if (typeof checkHealth === 'function') checkHealth();
+                    if (typeof loadDashboard === 'function') loadDashboard();
+                    if (typeof setupUploadZone === 'function') setupUploadZone();
+                }
+            } catch (e) {
+                console.error('Auth init error:', e);
+                // Fallback: show app without auth
+                document.getElementById('app').style.display = 'flex';
+                if (typeof checkHealth === 'function') checkHealth();
+                if (typeof loadDashboard === 'function') loadDashboard();
+                if (typeof setupUploadZone === 'function') setupUploadZone();
+            }
+        })();
+    </script>
+    <script src="/js/app.js"></script>
+</body>
+</html>
