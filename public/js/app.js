@@ -97,6 +97,7 @@ function showPage(page) {
         case 'invoices': loadInvoices(); break;
         case 'analytics': loadAnalytics(); break;
         case 'gst': loadGSTReport(); break;
+        case 'generator': loadTemplates(); break;
         case 'scan': resetScan(); break;
     }
     document.getElementById('sidebar').classList.remove('open');
@@ -532,6 +533,308 @@ async function loadGSTReport() {
     }
 }
 
+// ─── Invoice Templates & Generator ─────────────────────────────────────────
+let generatorTemplates = [];
+let editingTemplateId = null;
+let lastInvoiceHTML = '';
+let lastGeneratedId = null;
+let _generatorInit = false;
+let _currentTemplateId = '';
+
+const GEN_CATEGORIES = [
+    'Electronics', 'Cloud & Infrastructure', 'Office Supplies', 'Marketing & Printing',
+    'Software & SaaS', 'Utilities & Energy', 'Travel & Transport', 'Food & Catering',
+    'Professional Services', 'Health & Medical', 'Logistics & Shipping',
+    'Banking & Finance', 'Construction & Repairs', 'Rent & Lease',
+    'Other', 'Uncategorized'
+];
+const GEN_CURRENCIES = ['INR','USD','EUR','GBP','JPY','AUD','CAD','SGD','AED','SAR'];
+
+function initGenerator() {
+    if (_generatorInit) return;
+    _generatorInit = true;
+    const cySel = document.getElementById('genCurrency');
+    cySel.innerHTML = GEN_CURRENCIES.map(c => `<option value="${c}">${c}</option>`).join('');
+    document.getElementById('tplCurrency').innerHTML = GEN_CURRENCIES.map(c => `<option value="${c}">${c}</option>`).join('');
+    const catSel = document.getElementById('genCategory');
+    catSel.innerHTML = GEN_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('');
+    document.getElementById('genDate').value = new Date().toISOString().slice(0,10);
+    addItemRow({ description: 'Consulting Service', quantity: 1, rate: 15000 });
+    addItemRow({ description: 'Processing Fee', quantity: 1, rate: 1000 });
+}
+
+async function loadTemplates() {
+    initGenerator();
+    try {
+        const res = await authFetch('/api/templates');
+        const data = await res.json();
+        generatorTemplates = data.templates || [];
+        renderTemplateSelect();
+        renderTemplateManagerList();
+    } catch (err) {
+        console.error(err);
+        document.getElementById('tplSelect').innerHTML = '<option value="">Could not load templates</option>';
+    }
+}
+
+function renderTemplateSelect() {
+    const sel = document.getElementById('tplSelect');
+    const current = sel.value;
+    sel.innerHTML = generatorTemplates.map(t => `<option value="${t.id}">${esc(t.name)}${t.is_default ? ' (built-in)' : ''}</option>`).join('');
+    if (current && generatorTemplates.some(t => t.id === current)) sel.value = current;
+    if (!sel.value && sel.options.length) sel.value = sel.options[0].value;
+    // Only refill defaults when the effective selection actually changes, so
+    // navigating back to this page does not wipe the user's in-progress form.
+    if (sel.value !== _currentTemplateId) {
+        selectTemplate();
+    }
+}
+
+function selectTemplate() {
+    const template = generatorTemplates.find(t => t.id === document.getElementById('tplSelect').value);
+    if (!template) return;
+    _currentTemplateId = template.id;
+    document.getElementById('genCurrency').value = template.currency || 'INR';
+    document.getElementById('genTaxRate').value = template.tax_rate != null ? template.tax_rate : 18;
+    document.getElementById('genDiscount').value = template.discount_rate != null ? template.discount_rate : 0;
+    document.getElementById('genTerms').value = template.terms || '';
+    document.getElementById('genFooter').value = template.footer || '';
+    document.getElementById('genCustomerName').value = template.to_name || '';
+    document.getElementById('genCustomerAddress').value = template.to_address || '';
+    document.getElementById('genCustomerEmail').value = template.to_email || '';
+    document.getElementById('genCustomerPhone').value = template.to_phone || '';
+    document.getElementById('genCustomerGstin').value = template.to_gstin || '';
+    if (template.line_items && template.line_items.length) {
+        document.getElementById('genItemsBody').innerHTML = '';
+        template.line_items.forEach(it => addItemRow(it));
+    }
+}
+
+function addItemRow(item = {}) {
+    const tbody = document.getElementById('genItemsBody');
+    const tr = document.createElement('tr');
+    tr.className = 'line-item-row';
+    tr.innerHTML = `
+        <td><input class="gen-input li-desc" value="${escAttr(item.description || '')}" placeholder="Item description"></td>
+        <td><input class="gen-input li-qty num" type="number" min="0" step="0.01" value="${item.quantity != null ? item.quantity : 1}" oninput="updateItemAmount(this.closest('tr'))"></td>
+        <td><input class="gen-input li-rate num" type="number" min="0" step="0.01" value="${item.rate != null ? item.rate : 0}" oninput="updateItemAmount(this.closest('tr'))"></td>
+        <td class="li-amount num">${fmtCur(item.amount || 0, document.getElementById('genCurrency')?.value || 'INR')}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="removeLineItem(this)" title="Remove">×</button></td>`;
+    tbody.appendChild(tr);
+    updateItemAmount(tr, {animate:false});
+    return tr;
+}
+
+function removeLineItem(btn) {
+    btn.closest('tr').remove();
+}
+
+function updateItemAmount(row, opts = {}) {
+    const qty = parseFloat(row.querySelector('.li-qty')?.value) || 0;
+    const rate = parseFloat(row.querySelector('.li-rate')?.value) || 0;
+    const amount = row.querySelector('.li-amount');
+    if (amount) amount.textContent = fmtCur(qty * rate, document.getElementById('genCurrency')?.value || 'INR');
+}
+
+function collectLineItems() {
+    const items = [];
+    document.querySelectorAll('#genItemsBody .line-item-row').forEach(row => {
+        const desc = row.querySelector('.li-desc')?.value.trim() || '';
+        const qty = parseFloat(row.querySelector('.li-qty')?.value) || 0;
+        const rate = parseFloat(row.querySelector('.li-rate')?.value) || 0;
+        if (desc) items.push({ description: desc, quantity: qty, rate });
+    });
+    return items;
+}
+
+function openTemplateManager() {
+    loadTemplates();
+    document.getElementById('templateModalOverlay').classList.add('active');
+}
+
+function closeTemplateManager() {
+    document.getElementById('templateModalOverlay').classList.remove('active');
+    resetTemplateEditor();
+}
+
+function renderTemplateManagerList() {
+    const wrap = document.getElementById('templateList');
+    if (!generatorTemplates.length) {
+        wrap.innerHTML = '<p style="color:var(--text-muted);font-size:13px;">No templates yet. Create one on the right.</p>';
+        return;
+    }
+    wrap.innerHTML = generatorTemplates.map(t => `
+        <div class="template-cell">
+            <div>
+                <strong>${esc(t.name)}</strong>
+                <span class="template-meta">${esc(t.currency || 'INR')} · ${t.tax_rate != null ? t.tax_rate + '%' : '18%'}${t.is_default ? ' · Built-in' : ''}</span>
+            </div>
+            <div class="template-actions">
+                <button class="action-btn" onclick="editTemplate('${t.id}')">Edit</button>
+                ${t.is_default ? '<button class="action-btn" disabled>Default</button>' : `<button class="action-btn" style="color:var(--danger);border-color:rgba(239,68,68,.25)" onclick="deleteTemplate('${t.id}')">Delete</button>`}
+            </div>
+        </div>`).join('');
+}
+
+function editTemplate(id) {
+    const t = generatorTemplates.find(x => x.id === id);
+    if (!t) return;
+    editingTemplateId = id;
+    document.getElementById('templateEditorTitle').textContent = t.name || 'Edit Template';
+    document.getElementById('tplName').value = t.name || '';
+    document.getElementById('tplFromName').value = t.from_name || '';
+    document.getElementById('tplFromAddress').value = t.from_address || '';
+    document.getElementById('tplFromEmail').value = t.from_email || '';
+    document.getElementById('tplFromPhone').value = t.from_phone || '';
+    document.getElementById('tplFromGstin').value = t.from_gstin || '';
+    document.getElementById('tplToName').value = t.to_name || '';
+    document.getElementById('tplToAddress').value = t.to_address || '';
+    document.getElementById('tplToEmail').value = t.to_email || '';
+    document.getElementById('tplToPhone').value = t.to_phone || '';
+    document.getElementById('tplToGstin').value = t.to_gstin || '';
+    document.getElementById('tplCurrency').value = t.currency || 'INR';
+    document.getElementById('tplTaxRate').value = t.tax_rate != null ? t.tax_rate : 18;
+    document.getElementById('tplDiscount').value = t.discount_rate != null ? t.discount_rate : 0;
+    document.getElementById('tplAccent').value = t.accent_color || '#4f46e5';
+    document.getElementById('tplTerms').value = t.terms || '';
+    document.getElementById('tplFooter').value = t.footer || '';
+    document.getElementById('tplLineItems').value = (t.line_items || []).map(i => `${i.description} | ${i.quantity || 1} | ${i.rate || 0}`).join('\n');
+    document.getElementById('saveTemplateBtn').textContent = 'Update Template';
+}
+
+function resetTemplateEditor() {
+    editingTemplateId = null;
+    document.getElementById('templateEditorTitle').textContent = 'New Template';
+    ['tplName','tplFromName','tplFromAddress','tplFromEmail','tplFromPhone','tplFromGstin','tplToName','tplToAddress','tplToEmail','tplToPhone','tplToGstin','tplTerms','tplFooter','tplLineItems'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('tplCurrency').value = 'INR';
+    document.getElementById('tplTaxRate').value = '18';
+    document.getElementById('tplDiscount').value = '0';
+    document.getElementById('tplAccent').value = '#4f46e5';
+    document.getElementById('saveTemplateBtn').textContent = 'Save Template';
+}
+
+async function saveTemplate() {
+    const payload = {
+        name: document.getElementById('tplName').value.trim() || 'Untitled Template',
+        from_name: document.getElementById('tplFromName').value,
+        from_address: document.getElementById('tplFromAddress').value,
+        from_email: document.getElementById('tplFromEmail').value,
+        from_phone: document.getElementById('tplFromPhone').value,
+        from_gstin: document.getElementById('tplFromGstin').value,
+        to_name: document.getElementById('tplToName').value,
+        to_address: document.getElementById('tplToAddress').value,
+        to_email: document.getElementById('tplToEmail').value,
+        to_phone: document.getElementById('tplToPhone').value,
+        to_gstin: document.getElementById('tplToGstin').value,
+        currency: document.getElementById('tplCurrency').value,
+        tax_rate: parseFloat(document.getElementById('tplTaxRate').value) || 0,
+        discount_rate: parseFloat(document.getElementById('tplDiscount').value) || 0,
+        accent_color: document.getElementById('tplAccent').value,
+        terms: document.getElementById('tplTerms').value,
+        footer: document.getElementById('tplFooter').value,
+    };
+    const lines = document.getElementById('tplLineItems').value.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+        const p = l.split('|').map(x => x.trim());
+        return { description: p[0], quantity: parseFloat(p[1]) || 1, rate: parseFloat(p[2]) || 0 };
+    });
+    payload.line_items = lines;
+
+    try {
+        let res;
+        if (editingTemplateId) {
+            res = await authFetch(`/api/templates/${editingTemplateId}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        } else {
+            res = await authFetch('/api/templates', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        }
+        const data = await res.json();
+        if (data.error) { showToast(data.error || 'Template save failed', 'error'); return; }
+        const savedId = data.template?.id;
+        if (savedId) {
+            document.getElementById('tplSelect').value = savedId;
+        }
+        showToast('Template saved', 'success');
+        await loadTemplates();
+        document.getElementById('tplSelect').value = savedId || '';
+        selectTemplate();
+        resetTemplateEditor();
+    } catch { showToast('Template save failed', 'error'); }
+}
+
+async function deleteTemplate(id) {
+    if (!confirm('Delete this template?')) return;
+    try {
+        await authFetch(`/api/templates/${id}`, { method: 'DELETE' });
+        showToast('Template deleted', 'success');
+        await loadTemplates();
+    } catch { showToast('Delete failed', 'error'); }
+}
+
+function getGeneratorPayload() {
+    const template = generatorTemplates.find(t => t.id === document.getElementById('tplSelect').value);
+    return {
+        template_id: template?.id || '',
+        invoice_number: document.getElementById('genNumber').value.trim(),
+        invoice_date: document.getElementById('genDate').value,
+        due_date: document.getElementById('genDue').value,
+        customer: {
+            name: document.getElementById('genCustomerName').value,
+            address: document.getElementById('genCustomerAddress').value,
+            email: document.getElementById('genCustomerEmail').value,
+            phone: document.getElementById('genCustomerPhone').value,
+            gstin: document.getElementById('genCustomerGstin').value,
+        },
+        line_items: collectLineItems(),
+        tax_rate: parseFloat(document.getElementById('genTaxRate').value) || 0,
+        discount: parseFloat(document.getElementById('genDiscount').value) || 0,
+        currency: document.getElementById('genCurrency').value,
+        category: document.getElementById('genCategory').value,
+        payment_status: document.getElementById('genStatus').value,
+        notes: document.getElementById('genNotes').value,
+        terms: document.getElementById('genTerms').value || template?.terms || '',
+        footer: document.getElementById('genFooter').value || template?.footer || '',
+        accent_color: template?.accent_color || '#4f46e5',
+        save_to_library: document.getElementById('genSave').checked,
+    };
+}
+
+async function generateInvoice() {
+    const items = collectLineItems();
+    if (!items.length) { showToast('Add at least one line item', 'error'); return; }
+    if (!document.getElementById('genCustomerName').value.trim()) { showToast('Add a customer name', 'error'); return; }
+    try {
+        const res = await authFetch('/api/invoices/generate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(getGeneratorPayload()) });
+        const data = await res.json();
+        if (data.error) { showToast(data.error, 'error'); return; }
+        lastInvoiceHTML = data.html;
+        lastGeneratedId = data.invoice_id || null;
+        const frame = document.getElementById('invoicePreviewFrame');
+        frame.srcdoc = data.html;
+        document.getElementById('genSaveStatus').textContent = data.saved ? 'Saved to library ✓' : 'Preview only';
+        showToast(data.message || 'Invoice generated', 'success');
+    } catch (err) {
+        console.error(err);
+        showToast('Generation failed', 'error');
+    }
+}
+
+function printInvoice() {
+    const frame = document.getElementById('invoicePreviewFrame');
+    if (frame.contentWindow) frame.contentWindow.print();
+}
+
+function downloadInvoiceHTML() {
+    if (!lastInvoiceHTML) { showToast('Generate a preview first', 'error'); return; }
+    const blob = new Blob([lastInvoiceHTML], { type: 'text/html' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `invoice-${document.getElementById('genNumber').value || 'generated'}.html`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+    showToast('HTML invoice downloaded', 'success');
+}
+
 // ─── Export ─────────────────────────────────────────────────────────────────
 function exportCSV() {
     window.open('/api/export/csv', '_blank');
@@ -568,6 +871,14 @@ function esc(s) {
     const el = document.createElement('span');
     el.textContent = s;
     return el.innerHTML;
+}
+
+function escAttr(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
 }
 
 function showToast(msg, type='success') {

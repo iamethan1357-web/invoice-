@@ -48,6 +48,10 @@
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                 All Invoices
             </a>
+            <a href="#" class="nav-item" data-page="generator" onclick="showPage('generator')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="10" y2="15"/></svg>
+                Invoice Generator
+            </a>
             <div class="nav-section-label">Insights</div>
             <a href="#" class="nav-item" data-page="analytics" onclick="showPage('analytics')">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
@@ -231,6 +235,74 @@
             <div class="pagination" id="pagination"></div>
         </div>
 
+        <!-- ═══ Invoice Generator Page ═══ -->
+        <div class="page" id="page-generator">
+            <div class="page-header">
+                <h1>Invoice Generator</h1>
+                <p class="page-subtitle">Create a professional invoice from a reusable template, preview it, then print or save it</p>
+            </div>
+            <div class="generator-layout">
+                <div class="card generator-form">
+                    <div class="card-header"><h3>Invoice Details</h3></div>
+                    <div class="card-body" style="padding:20px 20px 24px;">
+                        <label class="gen-label">Template</label>
+                        <div class="template-row">
+                            <select id="tplSelect" class="gen-input" onchange="selectTemplate()"></select>
+                            <button class="btn btn-secondary btn-sm" onclick="openTemplateManager()">Manage</button>
+                        </div>
+                        <div class="gen-section">Invoice</div>
+                        <div class="gen-grid">
+                            <div><label>Invoice #</label><input class="gen-input" id="genNumber" placeholder="INV-0001"></div>
+                            <div><label>Date</label><input class="gen-input" id="genDate" type="date"></div>
+                            <div><label>Due Date</label><input class="gen-input" id="genDue" type="date"></div>
+                            <div><label>Currency</label><select class="gen-input" id="genCurrency"></select></div>
+                        </div>
+                        <div class="gen-section">Customer</div>
+                        <div class="gen-grid">
+                            <div class="full"><label>Name</label><input class="gen-input" id="genCustomerName" placeholder="Acme Pvt Ltd"></div>
+                            <div class="full"><label>Address</label><textarea class="gen-input" id="genCustomerAddress" rows="2" placeholder="Street, City, State, PIN"></textarea></div>
+                            <div><label>Email</label><input class="gen-input" id="genCustomerEmail"></div>
+                            <div><label>Phone</label><input class="gen-input" id="genCustomerPhone"></div>
+                            <div><label>GSTIN</label><input class="gen-input" id="genCustomerGstin"></div>
+                        </div>
+                        <div class="gen-section">Line Items</div>
+                        <table class="line-items-table gen-items-table">
+                            <thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th><th></th></tr></thead>
+                            <tbody id="genItemsBody"></tbody>
+                        </table>
+                        <button class="btn btn-secondary btn-sm" onclick="addItemRow()" style="margin-top:10px;">+ Add Item</button>
+                        <div class="gen-grid" style="margin-top:16px;">
+                            <div><label>Tax Rate %</label><input class="gen-input" id="genTaxRate" type="number" min="0" step="0.01" value="18"></div>
+                            <div><label>Discount %</label><input class="gen-input" id="genDiscount" type="number" min="0" step="0.01" value="0"></div>
+                            <div><label>Category</label><select class="gen-input" id="genCategory"></select></div>
+                            <div><label>Status</label><select class="gen-input" id="genStatus"><option value="Pending">Pending</option><option value="Paid">Paid</option></select></div>
+                        </div>
+                        <div class="gen-section">Notes</div>
+                        <textarea class="gen-input" id="genNotes" rows="2"></textarea>
+                        <div class="gen-section">Terms</div>
+                        <textarea class="gen-input" id="genTerms" rows="2"></textarea>
+                        <div class="gen-section">Footer</div>
+                        <input class="gen-input" id="genFooter">
+                        <label class="gen-check"><input type="checkbox" id="genSave" checked> Save generated invoice to your library</label>
+                        <div class="result-actions">
+                            <button class="btn btn-primary" onclick="generateInvoice()">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                                Generate Preview
+                            </button>
+                            <button class="btn btn-secondary" onclick="printInvoice()">Print / PDF</button>
+                            <button class="btn btn-secondary" onclick="downloadInvoiceHTML()">Download HTML</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card preview-panel">
+                    <div class="card-header"><h3>Live Preview</h3><span style="font-size:11px;color:var(--text-muted)" id="genSaveStatus"></span></div>
+                    <div class="card-body" style="padding:12px;">
+                        <iframe id="invoicePreviewFrame" class="invoice-preview-frame" title="Invoice preview"></iframe>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- ═══ Analytics Page ═══ -->
         <div class="page" id="page-analytics">
             <div class="page-header">
@@ -344,6 +416,58 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary btn-sm" onclick="closeModal()">Close</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteInvoice()">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Template Manager Modal ═══ -->
+    <div class="modal-overlay" id="templateModalOverlay" onclick="closeTemplateManager()">
+        <div class="modal modal-lg" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2>Invoice Templates</h2>
+                <button class="modal-close" onclick="closeTemplateManager()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="template-manager">
+                    <div class="template-list" id="templateList"><div class="loading">Loading templates...</div></div>
+                    <div class="template-editor">
+                        <h4 id="templateEditorTitle">New Template</h4>
+                        <label class="gen-label">Template Name</label>
+                        <input class="gen-input" id="tplName" placeholder="Business Default">
+                        <div class="gen-section">Your Business</div>
+                        <div class="gen-grid">
+                            <div class="full"><label>Business Name</label><input class="gen-input" id="tplFromName"></div>
+                            <div class="full"><label>Address</label><textarea class="gen-input" id="tplFromAddress" rows="2"></textarea></div>
+                            <div><label>Email</label><input class="gen-input" id="tplFromEmail"></div>
+                            <div><label>Phone</label><input class="gen-input" id="tplFromPhone"></div>
+                            <div><label>GSTIN</label><input class="gen-input" id="tplFromGstin"></div>
+                        </div>
+                        <div class="gen-section">Default Customer (optional)</div>
+                        <div class="gen-grid">
+                            <div class="full"><label>Customer Name</label><input class="gen-input" id="tplToName"></div>
+                            <div class="full"><label>Address</label><textarea class="gen-input" id="tplToAddress" rows="2"></textarea></div>
+                            <div><label>Email</label><input class="gen-input" id="tplToEmail"></div>
+                            <div><label>Phone</label><input class="gen-input" id="tplToPhone"></div>
+                            <div><label>GSTIN</label><input class="gen-input" id="tplToGstin"></div>
+                        </div>
+                        <div class="gen-section">Defaults</div>
+                        <div class="gen-grid">
+                            <div><label>Currency</label><select class="gen-input" id="tplCurrency"></select></div>
+                            <div><label>Tax Rate %</label><input class="gen-input" id="tplTaxRate" type="number" value="18"></div>
+                            <div><label>Discount %</label><input class="gen-input" id="tplDiscount" type="number" value="0"></div>
+                            <div><label>Accent Color</label><input class="gen-input" id="tplAccent" type="color" value="#4f46e5" style="height:38px;padding:4px;"></div>
+                        </div>
+                        <div class="gen-section">Default Line Items <span style="font-weight:400;font-size:11px;color:var(--text-muted)">(one per line: Description | Qty | Rate)</span></div>
+                        <textarea class="gen-input" id="tplLineItems" rows="3" placeholder="Consulting Service | 1 | 15000"></textarea>
+                        <div class="gen-section">Terms & Footer</div>
+                        <textarea class="gen-input" id="tplTerms" rows="2"></textarea>
+                        <input class="gen-input" id="tplFooter" style="margin-top:8px;">
+                        <div class="result-actions">
+                            <button class="btn btn-primary" id="saveTemplateBtn" onclick="saveTemplate()">Save Template</button>
+                            <button class="btn btn-secondary" onclick="resetTemplateEditor()">Clear</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

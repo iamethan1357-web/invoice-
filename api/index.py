@@ -260,6 +260,41 @@ def init_database():
                     conn.execute(f"ALTER TABLE invoices ADD COLUMN {col} {cd}")
                 except:
                     pass  # Column already exists
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS invoice_templates (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT,
+                    name TEXT NOT NULL DEFAULT 'Business Default',
+                    from_name TEXT DEFAULT '',
+                    from_address TEXT DEFAULT '',
+                    from_email TEXT DEFAULT '',
+                    from_phone TEXT DEFAULT '',
+                    from_gstin TEXT DEFAULT '',
+                    to_name TEXT DEFAULT '',
+                    to_address TEXT DEFAULT '',
+                    to_email TEXT DEFAULT '',
+                    to_phone TEXT DEFAULT '',
+                    to_gstin TEXT DEFAULT '',
+                    currency TEXT DEFAULT 'INR',
+                    tax_rate REAL DEFAULT 18,
+                    discount_rate REAL DEFAULT 0,
+                    terms TEXT DEFAULT 'Payment due within 30 days',
+                    footer TEXT DEFAULT 'Thank you for your business!',
+                    accent_color TEXT DEFAULT '#4f46e5',
+                    line_items TEXT DEFAULT '[]',
+                    is_builtin INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+            try:
+                conn.execute("ALTER TABLE invoice_templates ADD COLUMN is_builtin INTEGER DEFAULT 0")
+            except:
+                pass
+            try:
+                conn.execute("UPDATE invoice_templates SET is_builtin = 1 WHERE user_id IS NULL AND name = 'Business Default' AND is_builtin = 0")
+            except:
+                pass
             conn.commit()
         else:
             # PostgreSQL schema
@@ -315,6 +350,38 @@ def init_database():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_invoices_category ON invoices(category)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(payment_status)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_invoices_date ON invoices(invoice_date)")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS invoice_templates (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT,
+                    name TEXT NOT NULL DEFAULT 'Business Default',
+                    from_name TEXT DEFAULT '',
+                    from_address TEXT DEFAULT '',
+                    from_email TEXT DEFAULT '',
+                    from_phone TEXT DEFAULT '',
+                    from_gstin TEXT DEFAULT '',
+                    to_name TEXT DEFAULT '',
+                    to_address TEXT DEFAULT '',
+                    to_email TEXT DEFAULT '',
+                    to_phone TEXT DEFAULT '',
+                    to_gstin TEXT DEFAULT '',
+                    currency TEXT DEFAULT 'INR',
+                    tax_rate DECIMAL(6,2) DEFAULT 18,
+                    discount_rate DECIMAL(6,2) DEFAULT 0,
+                    terms TEXT DEFAULT 'Payment due within 30 days',
+                    footer TEXT DEFAULT 'Thank you for your business!',
+                    accent_color TEXT DEFAULT '#4f46e5',
+                    line_items JSONB DEFAULT '[]'::jsonb,
+                    is_builtin INTEGER DEFAULT 0,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                )
+            """)
+            try:
+                cur.execute("ALTER TABLE invoice_templates ADD COLUMN IF NOT EXISTS is_builtin INTEGER DEFAULT 0")
+                cur.execute("UPDATE invoice_templates SET is_builtin = 1 WHERE user_id IS NULL AND name = 'Business Default' AND is_builtin = 0")
+            except:
+                pass
 
         conn.commit()
         
@@ -330,7 +397,19 @@ def init_database():
         if count == 0:
             _seed_demo_data(conn)
             conn.commit()
-        
+
+        # Seed a default invoice template so the generator is ready to use.
+        if USE_SQLITE_FALLBACK:
+            t_count = conn.execute("SELECT COUNT(*) FROM invoice_templates").fetchone()[0]
+        else:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM invoice_templates")
+            t_count = cur.fetchone()[0]
+            cur.close()
+        if t_count == 0:
+            _seed_default_template(conn)
+            conn.commit()
+
         conn.close()
         print("✅ Database initialized successfully" + (" (SQLite local mode)" if USE_SQLITE_FALLBACK else " (Neon PostgreSQL)"))
     except Exception as e:
@@ -385,6 +464,51 @@ def _seed_demo_data(conn):
                   d['tax'], d['total'], d['currency'], total_inr, d['category'], d['status'],
                   json_mod.dumps([]), 95.0))
             cur.close()
+
+
+def _seed_default_template(conn):
+    """Insert a starter invoice template so the generator works out of the box."""
+    import json as json_mod
+    template_id = str(uuid.uuid4())
+    values = (
+        template_id,
+        None,
+        "Business Default",
+        "Your Company Pvt Ltd",
+        "12 MG Road, Jaipur, Rajasthan 302001",
+        "billing@yourcompany.in",
+        "+91 98765 43210",
+        "08AABCD1234F1Z5",
+        "", "", "", "", "",
+        "INR",
+        18.0,
+        0.0,
+        "Payment due within 30 days. Please quote the invoice number with your payment.",
+        "Thank you for your business! For questions, contact billing@yourcompany.in",
+        "#4f46e5",
+        json_mod.dumps([
+            {"description": "Consulting Service", "quantity": 1, "rate": 0.0},
+        ]),
+        1,
+    )
+    if USE_SQLITE_FALLBACK:
+        conn.execute("""
+            INSERT INTO invoice_templates (
+                id, user_id, name, from_name, from_address, from_email, from_phone,
+                from_gstin, to_name, to_address, to_email, to_phone, to_gstin,
+                currency, tax_rate, discount_rate, terms, footer, accent_color, line_items, is_builtin
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, values)
+    else:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO invoice_templates (
+                id, user_id, name, from_name, from_address, from_email, from_phone,
+                from_gstin, to_name, to_address, to_email, to_phone, to_gstin,
+                currency, tax_rate, discount_rate, terms, footer, accent_color, line_items, is_builtin
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)
+        """, values)
+        cur.close()
 
 
 # ─── Invoice Parser ──────────────────────────────────────────────────────────
@@ -1239,6 +1363,622 @@ def _generate_demo_result(filename: str) -> dict:
             {"description": "Professional Service", "amount": round(amount * 0.6, 2)},
             {"description": "Processing Fee", "amount": round(amount * 0.4, 2)},
         ]
+    }
+
+
+# ─── Invoice Templates & Generator ──────────────────────────────────────────
+
+_TEMPLATE_FIELDS = [
+    "name", "from_name", "from_address", "from_email", "from_phone", "from_gstin",
+    "to_name", "to_address", "to_email", "to_phone", "to_gstin",
+    "currency", "tax_rate", "discount_rate", "terms", "footer", "accent_color",
+    "line_items",
+]
+
+_CURRENCY_SYMBOLS = {
+    "INR": "₹", "USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥",
+    "AUD": "A$", "CAD": "C$", "SGD": "S$", "AED": "AED", "SAR": "SAR",
+}
+
+
+def _to_float(value, default=0.0) -> float:
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _serialize_template(row) -> dict:
+    row = dict(row)
+    if isinstance(row.get("line_items"), str):
+        try:
+            row["line_items"] = json.loads(row["line_items"])
+        except Exception:
+            row["line_items"] = []
+    for k in ("tax_rate", "discount_rate"):
+        if row.get(k) is not None:
+            row[k] = float(row[k])
+    for k in ("created_at", "updated_at"):
+        if row.get(k) and hasattr(row[k], "isoformat"):
+            row[k] = row[k].isoformat()
+    return row
+
+
+def _fetch_template(conn, template_id: str, user_id) -> dict:
+    if USE_SQLITE_FALLBACK:
+        if user_id:
+            row = conn.execute(
+                "SELECT * FROM invoice_templates WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                (template_id, user_id),
+            ).fetchone()
+        else:
+            row = conn.execute("SELECT * FROM invoice_templates WHERE id = ?", (template_id,)).fetchone()
+    else:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        if user_id:
+            cur.execute(
+                "SELECT * FROM invoice_templates WHERE id = %s AND (user_id = %s OR user_id IS NULL)",
+                (template_id, user_id),
+            )
+        else:
+            cur.execute("SELECT * FROM invoice_templates WHERE id = %s", (template_id,))
+        row = cur.fetchone()
+        cur.close()
+    if not row:
+        raise HTTPException(404, "Template not found")
+    return _serialize_template(row)
+
+
+def _insert_template_record(conn, template_id: str, user_id, body: dict) -> dict:
+    line_items = body.get("line_items") or []
+    if isinstance(line_items, str):
+        try:
+            line_items = json.loads(line_items)
+        except Exception:
+            line_items = []
+    values = (
+        template_id,
+        user_id,
+        body.get("name") or "New Template",
+        body.get("from_name", ""),
+        body.get("from_address", ""),
+        body.get("from_email", ""),
+        body.get("from_phone", ""),
+        body.get("from_gstin", ""),
+        body.get("to_name", ""),
+        body.get("to_address", ""),
+        body.get("to_email", ""),
+        body.get("to_phone", ""),
+        body.get("to_gstin", ""),
+        body.get("currency") or "INR",
+        _to_float(body.get("tax_rate"), 18.0),
+        _to_float(body.get("discount_rate"), 0.0),
+        body.get("terms") or "Payment due within 30 days",
+        body.get("footer") or "Thank you for your business!",
+        body.get("accent_color") or "#4f46e5",
+        json.dumps(line_items),
+        0,
+    )
+    if USE_SQLITE_FALLBACK:
+        conn.execute("""
+            INSERT INTO invoice_templates (
+                id, user_id, name, from_name, from_address, from_email, from_phone,
+                from_gstin, to_name, to_address, to_email, to_phone, to_gstin,
+                currency, tax_rate, discount_rate, terms, footer, accent_color, line_items, is_builtin
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, values)
+    else:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO invoice_templates (
+                id, user_id, name, from_name, from_address, from_email, from_phone,
+                from_gstin, to_name, to_address, to_email, to_phone, to_gstin,
+                currency, tax_rate, discount_rate, terms, footer, accent_color, line_items, is_builtin
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)
+        """, values)
+        cur.close()
+    conn.commit()
+    return _fetch_template(conn, template_id, user_id)
+
+
+@app.get("/api/templates")
+async def list_templates(request: Request):
+    """List saved invoice templates (user templates plus the built-in default)."""
+    user_id = get_current_user(request)
+    conn = get_db_connection()
+    if USE_SQLITE_FALLBACK:
+        if user_id:
+            rows = conn.execute(
+                "SELECT * FROM invoice_templates WHERE user_id = ? OR user_id IS NULL ORDER BY user_id IS NULL DESC, name"
+            , (user_id,)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM invoice_templates ORDER BY name").fetchall()
+    else:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        if user_id:
+            cur.execute(
+                "SELECT * FROM invoice_templates WHERE user_id = %s OR user_id IS NULL ORDER BY user_id IS NULL DESC, name",
+                (user_id,),
+            )
+        else:
+            cur.execute("SELECT * FROM invoice_templates ORDER BY name")
+        rows = cur.fetchall()
+        cur.close()
+    conn.close()
+    templates = [_serialize_template(r) for r in rows]
+    for t in templates:
+        t["is_default"] = bool(t.get("is_builtin"))
+    return {"templates": templates}
+
+
+@app.post("/api/templates")
+async def create_template(request: Request):
+    """Create an invoice template."""
+    user_id = get_current_user(request)
+    body = await request.json()
+    template_id = str(uuid.uuid4())
+    line_items = body.get("line_items") or []
+    if isinstance(line_items, str):
+        try:
+            line_items = json.loads(line_items)
+        except Exception:
+            line_items = []
+
+    values = (
+        template_id,
+        user_id,
+        body.get("name") or "New Template",
+        body.get("from_name", ""),
+        body.get("from_address", ""),
+        body.get("from_email", ""),
+        body.get("from_phone", ""),
+        body.get("from_gstin", ""),
+        body.get("to_name", ""),
+        body.get("to_address", ""),
+        body.get("to_email", ""),
+        body.get("to_phone", ""),
+        body.get("to_gstin", ""),
+        body.get("currency") or "INR",
+        _to_float(body.get("tax_rate"), 18.0),
+        _to_float(body.get("discount_rate"), 0.0),
+        body.get("terms") or "Payment due within 30 days",
+        body.get("footer") or "Thank you for your business!",
+        body.get("accent_color") or "#4f46e5",
+        json.dumps(line_items),
+    )
+
+    conn = get_db_connection()
+    if USE_SQLITE_FALLBACK:
+        insert_sql = """
+            INSERT INTO invoice_templates (
+                id, user_id, name, from_name, from_address, from_email, from_phone,
+                from_gstin, to_name, to_address, to_email, to_phone, to_gstin,
+                currency, tax_rate, discount_rate, terms, footer, accent_color, line_items
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """
+        conn.execute(insert_sql, values)
+    else:
+        insert_sql = """
+            INSERT INTO invoice_templates (
+                id, user_id, name, from_name, from_address, from_email, from_phone,
+                from_gstin, to_name, to_address, to_email, to_phone, to_gstin,
+                currency, tax_rate, discount_rate, terms, footer, accent_color, line_items
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+        """
+        cur = conn.cursor()
+        cur.execute(insert_sql, values)
+        cur.close()
+    conn.commit()
+
+    row = _fetch_template(conn, template_id, user_id)
+    conn.close()
+    row["is_default"] = False
+    return {"success": True, "template": row}
+
+
+@app.get("/api/templates/{template_id}")
+async def get_template(template_id: str, request: Request):
+    user_id = get_current_user(request)
+    conn = get_db_connection()
+    row = _fetch_template(conn, template_id, user_id)
+    conn.close()
+    row["is_default"] = bool(row.get("is_builtin"))
+    return {"template": row}
+
+
+@app.put("/api/templates/{template_id}")
+async def update_template(template_id: str, request: Request):
+    """Update an invoice template."""
+    user_id = get_current_user(request)
+    body = await request.json()
+    conn = get_db_connection()
+    row = _fetch_template(conn, template_id, user_id)
+    if row.get("user_id") and user_id and row["user_id"] != user_id:
+        conn.close()
+        raise HTTPException(403, "You cannot edit this template")
+
+    # When a signed-in user edits the built-in default, clone it into their own
+    # template instead of mutating the shared default.
+    if row.get("is_builtin") and user_id:
+        merged = {k: row.get(k) for k in _TEMPLATE_FIELDS}
+        merged.update({k: v for k, v in body.items() if k in _TEMPLATE_FIELDS})
+        new_id = str(uuid.uuid4())
+        inserted = _insert_template_record(conn, new_id, user_id, merged)
+        inserted["is_default"] = False
+        conn.close()
+        return {"success": True, "template": inserted}
+
+    updates = []
+    params = []
+    placeholder = "?" if USE_SQLITE_FALLBACK else "%s"
+    for field in _TEMPLATE_FIELDS:
+        if field in body:
+            if field == "line_items":
+                updates.append("line_items = %s::jsonb" if not USE_SQLITE_FALLBACK else "line_items = ?")
+                params.append(json.dumps(body[field] or []))
+            elif field == "tax_rate" or field == "discount_rate":
+                updates.append(f"{field} = {placeholder}")
+                params.append(_to_float(body[field]))
+            else:
+                updates.append(f"{field} = {placeholder}")
+                params.append(body[field])
+
+    if not updates:
+        conn.close()
+        return {"success": True, "template": _serialize_template(row)}
+
+    ts = "updated_at = datetime('now')" if USE_SQLITE_FALLBACK else "updated_at = NOW()"
+    updates.append(ts)
+    params.append(template_id)
+    query = f"UPDATE invoice_templates SET {', '.join(updates)} WHERE id = {placeholder}"
+    if USE_SQLITE_FALLBACK:
+        conn.execute(query, params)
+    else:
+        cur = conn.cursor()
+        cur.execute(query, params)
+        cur.close()
+    conn.commit()
+    row = _fetch_template(conn, template_id, user_id)
+    conn.close()
+    row["is_default"] = bool(row.get("is_builtin"))
+    return {"success": True, "template": row}
+
+
+@app.delete("/api/templates/{template_id}")
+async def delete_template(template_id: str, request: Request):
+    """Delete a user template. Built-in defaults cannot be deleted."""
+    user_id = get_current_user(request)
+    conn = get_db_connection()
+    row = _fetch_template(conn, template_id, user_id)
+    if row.get("is_builtin"):
+        conn.close()
+        raise HTTPException(400, "The built-in default template cannot be deleted")
+    if user_id and row.get("user_id") and row["user_id"] != user_id:
+        conn.close()
+        raise HTTPException(403, "You cannot delete this template")
+
+    placeholder = "?" if USE_SQLITE_FALLBACK else "%s"
+    if USE_SQLITE_FALLBACK:
+        conn.execute("DELETE FROM invoice_templates WHERE id = ?", (template_id,))
+    else:
+        cur = conn.cursor()
+        cur.execute(f"DELETE FROM invoice_templates WHERE id = {placeholder}", (template_id,))
+        cur.close()
+    conn.commit()
+    conn.close()
+    return {"success": True, "message": "Template deleted"}
+
+
+def _normalize_line_items(items) -> list:
+    out = []
+    for it in (items or []):
+        if not isinstance(it, dict):
+            continue
+        desc = str(it.get("description") or "").strip()
+        if not desc:
+            continue
+        qty = _to_float(it.get("quantity"), 1.0)
+        rate = _to_float(it.get("rate"))
+        amt = _to_float(it.get("amount"))
+        if amt == 0 and rate != 0:
+            amt = round(qty * rate, 2)
+        out.append({
+            "description": desc[:120],
+            "quantity": round(qty, 2),
+            "rate": round(rate, 2),
+            "amount": round(amt, 2),
+        })
+    return out
+
+
+def _save_generated_invoice(parsed: dict, user_id, invoice_id: str) -> None:
+    conn = get_db_connection()
+    insert_sql_pg = """
+        INSERT INTO invoices (
+            id, user_id, filename, original_name, vendor_name, invoice_number,
+            invoice_date, due_date, subtotal, tax_amount, tax_rate, cgst_amount,
+            sgst_amount, igst_amount, total_amount, currency, total_inr, category,
+            categorization_source, category_confidence, payment_status, notes, raw_text,
+            line_items, confidence_score
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)
+    """
+    insert_sql_lite = """
+        INSERT INTO invoices (
+            id, user_id, filename, original_name, vendor_name, invoice_number,
+            invoice_date, due_date, subtotal, tax_amount, tax_rate, cgst_amount,
+            sgst_amount, igst_amount, total_amount, currency, total_inr, category,
+            categorization_source, category_confidence, payment_status, notes, raw_text,
+            line_items, confidence_score
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """
+    values = (
+        invoice_id,
+        user_id,
+        "generated-invoice.html",
+        "generated-invoice.html",
+        parsed.get("vendor_name") or "Customer",
+        parsed.get("invoice_number") or "",
+        parsed.get("invoice_date"),
+        parsed.get("due_date"),
+        parsed.get("subtotal", 0),
+        parsed.get("tax_amount", 0),
+        parsed.get("tax_rate", 0),
+        parsed.get("cgst_amount", 0),
+        parsed.get("sgst_amount", 0),
+        parsed.get("igst_amount", 0),
+        parsed.get("total_amount", 0),
+        parsed.get("currency") or "INR",
+        parsed.get("total_inr", 0),
+        parsed.get("category") or "Uncategorized",
+        parsed.get("categorization_source") or "rules",
+        parsed.get("category_confidence", 0),
+        parsed.get("payment_status") or "Pending",
+        (parsed.get("notes") or "")[:2000],
+        "Generated invoice via Invoice Scanner Pro",
+        json.dumps(parsed.get("line_items") or []),
+        parsed.get("confidence_score", 98),
+    )
+    try:
+        if USE_SQLITE_FALLBACK:
+            conn.execute(insert_sql_lite, values)
+        else:
+            cur = conn.cursor()
+            cur.execute(insert_sql_pg, values)
+            cur.close()
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _render_invoice_html(data: dict) -> str:
+    """Render a standalone, printable HTML invoice."""
+    cur_sym = _CURRENCY_SYMBOLS.get(data.get("currency") or "INR", "")
+
+    def fmt(v):
+        v = float(v or 0)
+        return f"{cur_sym}{v:,.2f}" if data.get("currency") != "INR" else f"{cur_sym}{v:,.2f}"
+
+    line_items = data.get("line_items") or []
+    item_rows = "".join(
+        f"<tr><td>{escape(it.get('description') or 'Item')}</td>"
+        f"<td class='num'>{int(it.get('quantity') or 1)}</td>"
+        f"<td class='num'>{fmt(it.get('rate') or 0)}</td>"
+        f"<td class='num'>{fmt(it.get('amount') or 0)}</td></tr>"
+        for it in line_items
+    ) or "<tr><td colspan='4' class='empty'>No line items</td></tr>"
+
+    gst_row = ""
+    if float(data.get("cgst_amount") or 0) or float(data.get("sgst_amount") or 0) or float(data.get("igst_amount") or 0):
+        gst_row = (
+            f"<tr><td class='muted small'>CGST</td><td class='num muted small'>{fmt(data.get('cgst_amount'))}</td></tr>"
+            f"<tr><td class='muted small'>SGST</td><td class='num muted small'>{fmt(data.get('sgst_amount'))}</td></tr>"
+            f"<tr><td class='muted small'>IGST</td><td class='num muted small'>{fmt(data.get('igst_amount'))}</td></tr>"
+        )
+
+    accent = (data.get("accent_color") or "#4f46e5").strip()
+    if not re.match(r"^#[0-9a-fA-F]{3,8}$", accent):
+        accent = "#4f46e5"
+
+    css = """
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: 'Inter', Arial, Helvetica, sans-serif; color: #111827; padding: 40px; -webkit-print-color-adjust: exact; }
+      .invoice { max-width: 820px; margin: 0 auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; }
+      .head { padding: 28px 34px; color: #fff; background: ACCENT; }
+      .head h1 { font-size: 26px; letter-spacing: -0.5px; }
+      .head p { opacity: .85; font-size: 13px; margin-top: 4px; }
+      .head .inv-no { float: right; text-align: right; font-size: 13px; opacity: .9; }
+      .body { padding: 28px 34px; }
+      .parties { display: flex; gap: 30px; margin-bottom: 28px; }
+      .party { flex: 1; }
+      .party h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: #6b7280; margin-bottom: 6px; }
+      .party p { font-size: 13px; line-height: 1.6; }
+      .meta { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+      .meta .chip { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 12px; font-size: 12px; }
+      .meta .chip b { display: block; color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+      th { background: #f9fafb; text-align: left; padding: 10px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: #6b7280; }
+      td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; font-size: 13px; }
+      td.num, th.num { text-align: right; }
+      .empty { text-align: center; color: #9ca3af; padding: 20px; }
+      .totals { margin-left: auto; width: 280px; }
+      .totals table { margin: 0; }
+      .totals td { border: none; padding: 6px 12px; }
+      .totals .grand td { font-weight: 800; font-size: 16px; color: ACCENT; border-top: 2px solid #e5e7eb; }
+      .muted { color: #6b7280; font-size: 12px; }
+      .small { font-size: 11px; }
+      .notes { margin-top: 26px; padding-top: 18px; border-top: 1px dashed #e5e7eb; font-size: 13px; color: #374151; }
+      .feet { padding: 18px 34px; background: #f9fafb; font-size: 12px; color: #6b7280; }
+      @media print { body { padding: 0; } .invoice { border: none; border-radius: 0; } }
+    </style>
+    """.replace("ACCENT", accent)
+
+    business_email = data.get("from_email") or ""
+    business_phone = data.get("from_phone") or ""
+    contact_parts = " · ".join(x for x in [business_email, business_phone] if x)
+
+    body = f"""
+    <div class="invoice">
+      <div class="head">
+        <div class="inv-no">
+          <div>INVOICE</div>
+          <div><b>{escape(data.get('invoice_number') or '—')}</b></div>
+        </div>
+        <h1>{escape(data.get('from_name') or 'Your Business')}</h1>
+        <p>{escape(data.get('from_address') or '')}{(' · ' + escape(contact_parts)) if contact_parts else ''}</p>
+        {('<p>GSTIN: ' + escape(data.get('from_gstin') or '')) if data.get('from_gstin') else ''}</p>
+      </div>
+      <div class="body">
+        <div class="parties">
+          <div class="party"><h4>Billed To</h4>
+            <p><b>{escape(data.get('to_name') or 'Customer')}</b><br>{escape(data.get('to_address') or '')}<br>
+            {escape(data.get('to_email') or '')}{(' · ' + escape(data.get('to_phone') or '')) if data.get('to_phone') else ''}
+            {('<br>GSTIN: ' + escape(data.get('to_gstin') or '')) if data.get('to_gstin') else ''}</p>
+          </div>
+          <div class="party"><h4>Details</h4>
+            <div class="meta" style="margin-bottom:0;">
+              <div class="chip"><b>Invoice Date</b>{escape(data.get('invoice_date') or '—')}</div>
+              <div class="chip"><b>Due Date</b>{escape(data.get('due_date') or '—')}</div>
+              <div class="chip"><b>Currency</b>{escape(data.get('currency') or 'INR')}</div>
+            </div>
+          </div>
+        </div>
+        <table>
+          <thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead>
+          <tbody>{item_rows}</tbody>
+        </table>
+        <div class="totals">
+          <table>
+            <tr><td class="muted">Subtotal</td><td class="num">{fmt(data.get('subtotal'))}</td></tr>
+            {f"<tr><td class='muted'>Discount ({_to_float(data.get('discount'), 0):.2f}%)</td><td class='num'>-{fmt(data.get('discount_amount'))}</td></tr>" if float(data.get('discount_amount') or 0) > 0 else ""}
+            <tr><td class="muted">Tax ({_to_float(data.get('tax_rate'), 0):.2f}%)</td><td class="num">{fmt(data.get('tax_amount'))}</td></tr>
+            {gst_row}
+            <tr class="grand"><td>Total</td><td class="num">{fmt(data.get('total'))}</td></tr>
+          </table>
+        </div>
+        {('''<div class="notes"><b>Notes:</b> ''' + escape(data.get('notes') or '') + "</div>") if data.get('notes') else ""}
+        {('''<div class="notes"><b>Terms:</b> ''' + escape(data.get('terms') or '')) if data.get('terms') else ""}</div>
+      </div>
+      <div class="feet">{escape(data.get('footer') or 'Thank you for your business!')}</div>
+    </div>
+    """
+
+    return f"<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>Invoice {escape(data.get('invoice_number') or '')}</title>{css}</head><body>{body}</body></html>"
+
+
+@app.post("/api/invoices/generate")
+async def generate_invoice(request: Request):
+    """Generate (and optionally save) an invoice from a template + form data."""
+    user_id = get_current_user(request)
+    body = await request.json()
+    template = None
+    template_id = body.get("template_id") or ""
+    if template_id:
+        conn = get_db_connection()
+        try:
+            template = _fetch_template(conn, template_id, user_id)
+        finally:
+            conn.close()
+
+    def t(key, fallback=""):
+        if template and template.get(key) not in (None, ""):
+            return template[key]
+        return body.get(key, fallback)
+
+    customer = body.get("customer") or {}
+    from_name = t("from_name", "") or "Your Business"
+    from_address = t("from_address", "")
+    from_email = t("from_email", "")
+    from_phone = t("from_phone", "")
+    from_gstin = t("from_gstin", "")
+    to_name = customer.get("name") or t("to_name", "")
+    to_address = customer.get("address") or t("to_address", "")
+    to_email = customer.get("email") or t("to_email", "")
+    to_phone = customer.get("phone") or t("to_phone", "")
+    to_gstin = customer.get("gstin") or t("to_gstin", "")
+
+    currency = body.get("currency") or (template.get("currency") if template else "INR") or "INR"
+    tax_rate = _to_float(body.get("tax_rate"), _to_float(template.get("tax_rate") if template else 18.0, 18.0))
+    discount = _to_float(body.get("discount"), _to_float(template.get("discount_rate") if template else 0.0, 0.0))
+    terms = body.get("terms") or t("terms", "")
+    footer = body.get("footer") or t("footer", "")
+    accent = body.get("accent_color") or t("accent_color", "#4f46e5")
+
+    items = _normalize_line_items(body.get("line_items") or (template.get("line_items") if template else []))
+
+    invoice_number = (body.get("invoice_number") or "").strip() or f"INV-{uuid.uuid4().hex[:8].upper()}"
+    invoice_date = (body.get("invoice_date") or "").strip() or datetime.now().strftime("%Y-%m-%d")
+    due_date = (body.get("due_date") or "").strip()
+
+    subtotal = round(sum(it["amount"] for it in items), 2)
+    discount_amount = round(subtotal * discount / 100.0, 2)
+    taxable = round(subtotal - discount_amount, 2)
+    tax_amount = round(taxable * tax_rate / 100.0, 2)
+    total = round(taxable + tax_amount, 2)
+    total_inr = round(total * EXCHANGE_RATES_TO_INR.get(currency, 1.0), 2)
+
+    cgst = sgst = igst = 0.0
+    if currency == "INR" and tax_amount > 0:
+        cgst = round(tax_amount / 2, 2)
+        sgst = round(tax_amount / 2, 2)
+
+    category = body.get("category") or ""
+    cat_src = "manual"
+    cat_conf = float(body.get("category_confidence") or 90.0)
+    if not category:
+        cat_text = f"{to_name} " + " ".join(it["description"] for it in items)
+        category, cat_src, cat_conf = ai_categorize(cat_text, to_name)
+
+    notes = body.get("notes") or ""
+    parsed = {
+        "vendor_name": to_name or "Customer",
+        "invoice_number": invoice_number,
+        "invoice_date": invoice_date,
+        "due_date": due_date,
+        "subtotal": subtotal,
+        "tax_amount": tax_amount,
+        "tax_rate": tax_rate,
+        "cgst_amount": cgst,
+        "sgst_amount": sgst,
+        "igst_amount": igst,
+        "total_amount": total,
+        "currency": currency,
+        "total_inr": total_inr,
+        "category": category or "Uncategorized",
+        "categorization_source": cat_src,
+        "category_confidence": cat_conf,
+        "payment_status": body.get("payment_status") or "Pending",
+        "notes": notes,
+        "line_items": items,
+        "confidence_score": 98,
+    }
+
+    save = body.get("save_to_library") is not False
+    if save:
+        invoice_id = str(uuid.uuid4())
+        _save_generated_invoice(parsed, user_id, invoice_id)
+    else:
+        invoice_id = None
+
+    html = _render_invoice_html({
+        **parsed,
+        "from_name": from_name, "from_address": from_address,
+        "from_email": from_email, "from_phone": from_phone, "from_gstin": from_gstin,
+        "to_name": to_name, "to_address": to_address, "to_email": to_email,
+        "to_phone": to_phone, "to_gstin": to_gstin,
+        "discount": discount, "discount_amount": discount_amount,
+        "terms": terms, "footer": footer, "accent_color": accent,
+    })
+
+    return {
+        "success": True,
+        "invoice_id": invoice_id,
+        "saved": save,
+        "data": parsed,
+        "html": html,
+        "message": "Invoice generated" + (" and saved to your library" if save else ""),
     }
 
 
