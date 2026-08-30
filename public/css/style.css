@@ -1514,3 +1514,135 @@ body.theme-light .gen-input {
     color: var(--text-primary);
 }
 body.theme-light .settings-hint code { background: var(--surface-3); }
+
+/* Black & white theme override — pure monochrome, no colour anywhere */
+body.theme-bw {
+    --surface-0: #ffffff;
+    --surface-1: #ffffff;
+    --surface-2: #ffffff;
+    --surface-3: #f2f2f2;
+    --surface-4: #e6e6e6;
+    --surface-hover: #dcdcdc;
+    --border-subtle: rgba(0, 0, 0, 0.12);
+    --border-default: rgba(0, 0, 0, 0.24);
+    --border-hover: rgba(0, 0, 0, 0.40);
+    --border-active: rgba(0, 0, 0, 0.72);
+    --text-primary: #000000;
+    --text-secondary: #333333;
+    --text-muted: #6f6f6f;
+    --text-inverted: #ffffff;
+
+    /* Brand collapses to black so no accent colour survives */
+    --brand-50: #ffffff;
+    --brand-100: #f2f2f2;
+    --brand-400: #4d4d4d;
+    --brand-500: #000000;
+    --brand-600: #000000;
+    --brand-700: #000000;
+
+    /* Semantic colours reduce to greyscale steps */
+    --success: #000000;
+    --success-bg: rgba(0, 0, 0, 0.05);
+    --success-border: rgba(0, 0, 0, 0.30);
+    --warning: #000000;
+    --warning-bg: rgba(0, 0, 0, 0.08);
+    --warning-border: rgba(0, 0, 0, 0.40);
+    --danger: #000000;
+    --danger-bg: rgba(0, 0, 0, 0.10);
+    --danger-border: rgba(0, 0, 0, 0.50);
+    --info: #000000;
+    --info-bg: rgba(0, 0, 0, 0.05);
+    --info-border: rgba(0, 0, 0, 0.30);
+
+    /* No coloured glows */
+    --glow-brand: 0 0 40px rgba(0, 0, 0, 0.08);
+    --glow-success: 0 0 40px rgba(0, 0, 0, 0.08);
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.10);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
+    --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.14);
+    --shadow-xl: 0 24px 60px rgba(0, 0, 0, 0.18);
+}
+body.theme-bw .sidebar {
+    background: #ffffff;
+    border-right-color: var(--border-default);
+}
+body.theme-bw .top-bar { background: rgba(255, 255, 255, 0.9); }
+body.theme-bw .upload-zone,
+body.theme-bw .card,
+body.theme-bw .scan-result,
+body.theme-bw .processing {
+    background: #ffffff;
+    border-color: var(--border-default);
+}
+body.theme-bw .gen-input {
+    background: #ffffff;
+    color: #000000;
+}
+body.theme-bw .settings-hint code { background: var(--surface-3); color: #000000; }
+body.theme-bw .btn-primary {
+    background: #000000;
+    color: #ffffff;
+}
+body.theme-bw .btn-primary:hover { background: #1a1a1a; }
+body.theme-bw .status-pill.ok,
+body.theme-bw .status-pill.warn {
+    background: rgba(0, 0, 0, 0.06);
+    color: #000000;
+    border-color: var(--border-default);
+}
+/* Status dots keep meaning without colour: filled vs hollow */
+body.theme-bw .status-dot.green { background: #000000; box-shadow: none; }
+body.theme-bw .status-dot.yellow {
+    background: #ffffff;
+    border: 2px solid #000000;
+    box-shadow: none;
+}
+body.theme-bw .status-dot.red {
+    background: #000000;
+    box-shadow: 0 0 0 2px #ffffff, 0 0 0 3px #000000;
+}
+
+/* Neutralise hardcoded colour literals that bypass the CSS variables */
+body.theme-bw::before,
+body.theme-bw #authScreen::before { background: none; }
+body.theme-bw .logo-icon,
+body.theme-bw .user-avatar { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); }
+body.theme-bw .user-avatar { background: #000000; }
+body.theme-bw .logo-text {
+    background: none;
+    -webkit-background-clip: initial;
+    -webkit-text-fill-color: #000000;
+    color: #000000;
+}
+body.theme-bw .nav-item.active { background: rgba(0, 0, 0, 0.06); }
+body.theme-bw .stat-card::before {
+    background: linear-gradient(135deg, rgba(0, 0, 0, 0.04), transparent 60%);
+}
+body.theme-bw .stat-card .stat-icon {
+    background: rgba(0, 0, 0, 0.06);
+    color: #000000;
+}
+body.theme-bw .upload-zone::before {
+    background: radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0.04), transparent 70%);
+}
+body.theme-bw .data-item.highlight {
+    border-color: rgba(0, 0, 0, 0.40);
+    background: rgba(0, 0, 0, 0.04);
+}
+body.theme-bw .confidence-fill { background: #000000; }
+body.theme-bw .cat-source.ai { background: #000000; }
+body.theme-bw .cat-source.rules { background: #6f6f6f; }
+body.theme-bw .action-btn {
+    color: #000000;
+    border-color: rgba(0, 0, 0, 0.24);
+}
+body.theme-bw .action-btn:hover {
+    background: #000000;
+    color: #ffffff;
+    border-color: #000000;
+}
+body.theme-bw .search-box:focus-within,
+body.theme-bw .gen-input:focus,
+body.theme-bw .paste-ocr textarea:focus { box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.10); }
+body.theme-bw .cl-formFieldInput:focus { box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.10) !important; }

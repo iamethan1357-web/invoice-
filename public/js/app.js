@@ -910,11 +910,12 @@ const SETTINGS_FIELDS = [
     'payment_terms', 'invoice_footer', 'accent_color', 'theme'
 ];
 
+const THEMES = ['dark', 'light', 'bw'];
+
 function setTheme(theme) {
-    const light = theme === 'light';
-    document.body.classList.toggle('theme-light', light);
-    document.body.classList.toggle('theme-dark', !light);
-    try { localStorage.setItem('isp_theme', theme); } catch(e) {}
+    const t = THEMES.includes(theme) ? theme : 'dark';
+    THEMES.forEach(name => document.body.classList.toggle('theme-' + name, name === t));
+    try { localStorage.setItem('isp_theme', t); } catch(e) {}
 }
 
 async function loadSettings() {
