@@ -562,7 +562,16 @@ class InvoiceParser:
         "USD": r"\$\s*\d|USD|US\s*\$|US\s*Dollar",
         "EUR": r"€|EUR|Euro",
         "GBP": r"£|GBP|Pounds?",
+        "AUD": r"AUD|Australian\s*Dollar|AU\s*\$",
+        "CAD": r"CAD|Canadian\s*Dollar|CA\s*\$",
+        "SGD": r"SGD|Singapore\s*Dollar|S\s*\$",
+        "AED": r"AED|UAE\s*Dirham",
+        "SAR": r"SAR|Saudi\s*Riyal",
     }
+
+    # Explicit currency codes (e.g. "(AUD)", "Total due (AUD)") are more
+    # reliable than a bare "$", so check these before symbol patterns.
+    _CURRENCY_CODES = ["AUD", "USD", "EUR", "GBP", "CAD", "SGD", "AED", "SAR", "INR"]
 
     @staticmethod
     def _lines(text: str) -> list:
@@ -587,7 +596,7 @@ class InvoiceParser:
         return label.strip(), value
 
     @classmethod
-    def _find_amount(cls, lines: list, labels: list) -> float:
+    def _find_amount(cls, lines: list, labels: list, allow_next_line: bool = False) -> float:
         """Find the most specific labelled amount in priority order.
 
         Labels like 'grand total' / 'total amount' are checked before the
@@ -608,7 +617,7 @@ class InvoiceParser:
                     r"(?:^|(?<=[\s:;.-]))(?:" + re.escape(label) + r")\b",
                     re.IGNORECASE,
                 )
-            for raw in lines:
+            for idx, raw in enumerate(lines):
                 line = cls._fix_line(raw)
                 if not line:
                     continue
@@ -617,22 +626,40 @@ class InvoiceParser:
                     continue
                 tail = line[m.end():]
                 amt = re.search(r"(?:[$₹€£]\s*)?(" + _AMOUNT_RE + r")", tail)
-                if amt:
+                if amt and not cls._looks_like_date(amt.group(0)):
                     return cls.parse_amount(amt.group(0))
+                # Value may be on the next OCR line(s) — common in column-based
+                # PDFs where "Total due (AUD)" and "$2,510.00" are separate rows.
+                if allow_next_line:
+                    for look in lines[idx + 1: idx + 7]:
+                        nxt = cls._fix_line(look)
+                        if cls._looks_like_date(nxt) or "%" in nxt or re.search(r"\bfrom\b", nxt):
+                            continue
+                        amt = re.search(r"(?:[$₹€£]\s*)?(" + _AMOUNT_RE + r")", nxt)
+                        if amt:
+                            return cls.parse_amount(amt.group(0))
                 # Some OCR puts the label at the end of the line/column; fall
                 # back to the first amount on the line.
                 _, value = cls._amount_on_line(line)
                 if value is not None:
                     return value
             # fallback: scan the whole text for label followed by an amount
-            for raw in lines:
+            for idx, raw in enumerate(lines):
                 line = cls._fix_line(raw)
                 m = rx.search(line)
                 if m:
                     tail = line[m.end():]
                     amt = re.search(r"(?:[$₹€£]\s*)?(" + _AMOUNT_RE + r")", tail)
-                    if amt:
+                    if amt and not cls._looks_like_date(amt.group(0)):
                         return cls.parse_amount(amt.group(0))
+                    if allow_next_line:
+                        for look in lines[idx + 1: idx + 7]:
+                            nxt = cls._fix_line(look)
+                            if cls._looks_like_date(nxt) or "%" in nxt or re.search(r"\bfrom\b", nxt):
+                                continue
+                            amt = re.search(r"(?:[$₹€£]\s*)?(" + _AMOUNT_RE + r")", nxt)
+                            if amt:
+                                return cls.parse_amount(amt.group(0))
         return 0.0
 
     @classmethod
@@ -722,20 +749,47 @@ class InvoiceParser:
     @classmethod
     def extract_date(cls, text: str, labels: list, allow_fallback: bool = True) -> Optional[str]:
         lines = cls._lines(text)
-        date_label = cls._extract_with_context(lines, labels)
-        if date_label:
-            # If the context value itself is already a date (e.g. 19-Sep-2026).
-            if cls._looks_like_date(date_label):
-                m = re.search(
-                    r"\d{1,4}[./-]\d{1,4}[./-]\d{1,4}|"
-                    r"\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*\.?\s+\d{2,4}|"
-                    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{2,4}|"
-                    r"\d{1,2}[-/](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*[-/]\d{2,4}",
-                    date_label,
+
+        def _date_in(value: Optional[str]):
+            if not value or not cls._looks_like_date(value):
+                return None
+            m = re.search(
+                r"\d{1,4}[./-]\d{1,4}[./-]\d{1,4}|"
+                r"\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*\.?\s+\d{2,4}|"
+                r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{2,4}|"
+                r"\d{1,2}[-/](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*[-/]\d{2,4}",
+                value,
+                re.IGNORECASE,
+            )
+            return cls._normalize_date(m.group(0)) if m else None
+
+        # Try labeled contexts first; OCR often places the date on the line
+        # after the label (e.g. "Due date:\n3/8/2022").
+        for idx, raw in enumerate(lines):
+            line = cls._fix_line(raw)
+            for label in labels:
+                rx = re.compile(
+                    r"(?:^|(?<=[\s:;.-]))" + re.escape(label) + r"\b",
                     re.IGNORECASE,
                 )
-                if m:
-                    return cls._normalize_date(m.group(0))
+                m = rx.search(line)
+                if not m:
+                    continue
+                tail = line[m.end():].strip().lstrip(":-. \t#")
+                val = _date_in(tail)
+                if val:
+                    return val
+                # Look for the date on the following few lines. For due/pay
+                # labels prefer the last date found (e.g. "Due date:\n
+                # Reference:\n19/7/2022\n3/8/2022").
+                found = []
+                for look in lines[idx + 1: idx + 5]:
+                    nxt = cls._fix_line(look)
+                    val = _date_in(nxt)
+                    if val:
+                        found.append(val)
+                if found:
+                    return found[-1] if label.lower().startswith("due") else found[0]
         if not allow_fallback:
             return None
         # Fallback: find any date in the document (useful when label is missing)
@@ -783,6 +837,8 @@ class InvoiceParser:
         """Best-effort detection of address/contact lines (not vendor names)."""
         if not line:
             return True
+        if re.fullmatch(r"(?:[$₹€£]\s*)?\d[\d,]*\.?\d*", line):
+            return False  # pure amount (e.g. "100.00"), not an address
         if re.match(r"^\s*\d+[\s,.-]+", line):   # 12 MG Road / 123 Main St
             return True
         if re.search(r",\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?$", line):  # US ZIP
@@ -828,15 +884,22 @@ class InvoiceParser:
         for raw in lines:
             line = cls._fix_line(raw)
             m = re.search(
-                r"(?:from|seller|vendor|company|business|issued\s*by|billed\s*by|supplier|"
+                r"(?:from|seller|vendor|company\b|business\b|issued\s*by|billed\s*by|supplier|"
                 r"bill\s*from)\s*[:\-.]?\s*(.+)",
                 line,
                 re.IGNORECASE,
             )
             if m:
                 candidate = cls._clean_vendor_candidate(m.group(1).strip())
-                if len(candidate) >= 3 and re.search(r"[A-Za-z]", candidate) and not cls._looks_like_address(candidate):
+                if (len(candidate) >= 3 and re.search(r"[A-Za-z]", candidate)
+                        and not cls._looks_like_address(candidate)
+                        and candidate.lower() not in ("name", "business name", "your business")
+                        and "signature" not in candidate.lower()):
                     return candidate[:80]
+        # Common invoice-template placeholders.
+        m = re.search(r"\byour\s+business(?:\s+name)?\b", text, re.IGNORECASE)
+        if m:
+            return "Your Business Name"
         strong = re.compile(
             r"(?:Pvt|Private|Ltd|Limited|LLC|Inc|Corp|S\.A|Solutions|Enterprises|Ventures|"
             r"Services|Industries|Traders|Trading|Works|Technologies|Tech|Energy|Power|"
@@ -858,6 +921,9 @@ class InvoiceParser:
         for raw in lines[:15]:
             line = cls._fix_line(raw)
             if not line or header_label.search(line) or customer_label.search(line) or cls._looks_like_address(line):
+                continue
+            if line.lower() in ("name", "your business", "business name", "your name",
+                                 "company", "company name", "your client"):
                 continue
             if re.fullmatch(r"[^0-9@]*[A-Za-z][A-Za-z0-9 &'.,()\-]{2,60}", line):
                 if strong.search(line) or re.search(r"[A-Z]{2,}", line):
@@ -900,6 +966,10 @@ class InvoiceParser:
 
     @staticmethod
     def detect_currency(text: str) -> str:
+        # Prefer explicit currency codes over a bare symbol.
+        for code in InvoiceParser._CURRENCY_CODES:
+            if re.search(rf"\b{re.escape(code)}\b", text, re.IGNORECASE):
+                return code
         for code, pattern in InvoiceParser._CURRENCY_LABELS.items():
             if re.search(pattern, text, re.IGNORECASE):
                 return code
@@ -937,6 +1007,19 @@ class InvoiceParser:
             else:
                 combined_tax += amt
 
+        # "GST 10% from $100.00" style rows. The tax amount is derived from the
+        # base amount when the actual tax is not printed on the same line.
+        from_re = (
+            r"(?:cgst|sgst|igst|gst|vat|tax)\s*\(?(?P<rate>\d+(?:\.\d+)?)%\)?\s*"
+            r"from\s*(?:on\s*)?(?:(?:[$₹€£A-Za-z]+)\s*)?(?P<base>" + _AMOUNT_RE + r")"
+        )
+        for m in re.finditer(from_re, text, re.IGNORECASE):
+            rate = float(m.group("rate"))
+            base = InvoiceParser.parse_amount(m.group("base"))
+            if rate > 0 and base > 0:
+                combined_tax += round(base * rate / 100.0, 2)
+                combined_rates.append(rate)
+
         # "(CGST 9%) 4500" / "CGST 9% 4500" / "Tax (8.25%) 90.75"
         rate_re = (
             r"(?:(?:cgst|sgst|igst|gst|vat|tax)\s*\()[^:]{0,18}?"
@@ -945,6 +1028,11 @@ class InvoiceParser:
             r"[:#.-]?\s*(?:(?:[$₹€£])\s*)?(?P<amt2>" + _AMOUNT_RE + r")?"
         )
         for m in re.finditer(rate_re, text, re.IGNORECASE):
+            # Skip rows already handled by the "GST 10% from $..." pattern so
+            # the rate isn't counted twice.
+            surround = text[max(0, m.start() - 20): m.end() + 20].lower()
+            if re.search(r"\bfrom\b", surround):
+                continue
             rate = float(m.group("rate") or m.group("rate2") or 0)
             amt = InvoiceParser.parse_amount(m.group("amt") or m.group("amt2"))
             label = m.group(0)
@@ -1003,54 +1091,73 @@ class InvoiceParser:
         items = []
         lines = [cls._fix_line(l) for l in cls._lines(text)]
         in_section = False
+        table_done = False
+        amount_table = False
+        desc_candidates = []
+        amount_stream = []
         for line in lines:
-            if not line or len(line) < 4:
+            if not line or len(line) < 3:
                 continue
             # Amount columns, allowing optional currency symbols.
             amount_match = list(re.finditer(r"(?:[$₹€£]\s*)?" + _AMOUNT_RE, line))
-            # A summary/totals line always ends the item table first.
-            if cls._SUMMARY_RE.match(line):
-                break
-            # A pure header row ("Item Qty Rate") has no amounts; a line like
-            # "Service 500" starts with a header word but is an actual item.
-            if cls._ITEM_HEADER_RE.match(line) and not amount_match:
+            # A pure header row ("Item Qty Rate" / "Quantity" / "Amount") has
+            # no amounts; a line like "Service 500" starts with a header word
+            # but is an actual item.
+            if not amount_match and _looks_like_column_header(line) and cls._ITEM_HEADER_RE.match(line):
                 in_section = True
+                if re.search(r"\b(?:quantity|unit\s*price|unit\s*rate|amount|price|rate)\b", line, re.IGNORECASE):
+                    amount_table = True
                 continue
-            if cls._looks_like_non_item_line(line) or cls._looks_like_address(line) or cls._looks_like_date(line):
+            # Summary / tax / address / date lines are never items. The first
+            # summary row ends the item-description table; amounts coming
+            # after it belong to the numeric item table below.
+            if cls._SUMMARY_RE.match(line) or cls._looks_like_non_item_line(line):
+                if in_section:
+                    table_done = True
                 continue
-            if not amount_match:
+            if cls._looks_like_address(line) or cls._looks_like_date(line):
                 continue
-            # Without a header row we only trust lines with at least two numbers
-            # (qty + rate + amount), which avoids dates and single-number totals.
             if not in_section:
-                # Flattened OCR can put the summary on the same line as the
-                # items; don't turn that whole line into one bogus item.
-                if len(line) > 160 or re.search(
+                # Without a header row only trust lines with 2+ numbers.
+                if len(amount_match) >= 2 and not re.search(
                     r"\b(?:subtotal|total|tax|gst|cgst|sgst|igst|vat|discount|balance|amount due)\b",
                     line, re.IGNORECASE,
                 ):
-                    continue
-                if len(amount_match) < 2:
-                    continue
-            last = amount_match[-1]
-            amount = cls.parse_amount(last.group(0))
-            # Description = everything before the final amount column.
-            desc = line[:last.start()]
-            desc = re.sub(r"\s+", " ", desc).strip(" |:.-")
-            # Remove trailing qty/rate/currency columns.
-            parts = desc.split()
-            while parts:
-                tok = parts[-1]
-                if re.fullmatch(r"(?:[$₹€£]\s*)?\d[\d,]*\.?\d*", tok):
-                    parts.pop()
-                elif tok.lower() in ("qty", "qty.", "rate", "rs", "inr", "&", "@", "x", "x1"):
-                    parts.pop()
-                else:
-                    break
-            desc = " ".join(parts).strip(" |:.-")
-            if len(desc) >= 2 and amount > 0 and not cls._SUMMARY_RE.match(desc) and not cls._looks_like_non_item_line(desc):
-                items.append({"description": desc[:80], "amount": amount})
-        return items[:15]
+                    _append_amount_item(items, line, amount_match, cls)
+                continue
+            # Column-based PDFs often split descriptions and amounts onto
+            # separate OCR rows. Collect descriptions and pure amount rows.
+            if not amount_match and not table_done:
+                desc = line.strip(" |:.-")
+                if (len(desc) >= 2 and re.search(r"[A-Za-z]{2,}", desc)
+                        and not _looks_like_column_header(desc)):
+                    desc_candidates.append(desc[:80])
+                continue
+            # Amount-only row like "$100.00" / "100.00".
+            full_amount = re.fullmatch(r"(?:[$₹€£]\s*)?(" + _AMOUNT_RE + r")", line)
+            if full_amount and amount_table:
+                amount_stream.append(cls.parse_amount(full_amount.group(0)))
+            elif not table_done:
+                _append_amount_item(items, line, amount_match, cls)
+        # Map description rows to the amount table (dedupe repeated qty/price
+        # columns that OCR outputs twice, e.g. "100.00 100.00").
+        if desc_candidates and amount_stream:
+            uniq = []
+            for a in amount_stream:
+                if a > 0 and (not uniq or abs(uniq[-1] - a) > 0.01):
+                    uniq.append(a)
+            for desc, amount in zip(desc_candidates, uniq):
+                items.append({"description": desc, "amount": amount})
+        # De-duplicate by (description, amount) while preserving order.
+        seen = set()
+        final = []
+        for it in items:
+            key = (it["description"].lower(), round(it["amount"], 2))
+            if key in seen:
+                continue
+            seen.add(key)
+            final.append(it)
+        return final[:15]
 
     @classmethod
     def parse(cls, raw_text: str) -> dict:
@@ -1073,8 +1180,10 @@ class InvoiceParser:
 
         result['total_amount'] = cls._find_amount(
             lines,
-            ["grand total", "total due", "amount due", "amount payable", "total payable",
-             "net payable", "total amount", "invoice total", "balance due", "total"],
+            ["grand total", "total due", "total (aud)", "total (usd)", "amount due",
+             "amount payable", "total payable", "net payable", "total amount",
+             "invoice total", "balance due", "total"],
+            allow_next_line=True,
         )
         result['subtotal'] = cls._find_amount(
             lines,
@@ -1116,6 +1225,38 @@ class InvoiceParser:
                     if result.get(k) and result[k] not in [None, 0, '', 'Unknown Vendor'])
         result['confidence_score'] = round((found / 4) * 100)
         return result
+
+
+def _looks_like_column_header(line: str) -> bool:
+    """True for table labels such as 'Quantity', 'Unit price', 'Amount ($)'."""
+    l = line.lower()
+    if "&" in l or " / " in l:
+        return False
+    return bool(re.match(
+        r"^(?:qty|quantity|unit\s*price|unit\s*rate|rate|price|amount|total|description|"
+        r"service|items?|particulars?)\b",
+        line, re.IGNORECASE,
+    ))
+
+
+def _append_amount_item(items: list, line: str, amount_match: list, cls):
+    last = amount_match[-1]
+    amount = cls.parse_amount(last.group(0))
+    desc = line[:last.start()]
+    desc = re.sub(r"\s+", " ", desc).strip(" |:.-")
+    parts = desc.split()
+    while parts:
+        tok = parts[-1]
+        if re.fullmatch(r"(?:[$₹€£]\s*)?\d[\d,]*\.?\d*", tok):
+            parts.pop()
+        elif tok.lower() in ("qty", "qty.", "rate", "rs", "inr", "&", "@", "x", "x1"):
+            parts.pop()
+        else:
+            break
+    desc = " ".join(parts).strip(" |:.-")
+    if len(desc) >= 2 and amount > 0 and not cls._SUMMARY_RE.match(desc) and not cls._looks_like_non_item_line(desc):
+        items.append({"description": desc[:80], "amount": amount})
+
 
 
 # ─── OCR Engine ──────────────────────────────────────────────────────────────
