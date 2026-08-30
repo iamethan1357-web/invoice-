@@ -857,7 +857,7 @@ function fmtCur(amt, cur) {
     const n = parseFloat(amt);
     const syms = {INR:'₹',USD:'$',EUR:'€',GBP:'£',JPY:'¥',AUD:'A$',CAD:'C$',SGD:'S$',AED:'AED',SAR:'SAR'};
     const s = syms[cur] || cur || '';
-    if (cur === 'INR') return s + n.toLocaleString('en-IN', {maximumFractionDigits:0});
+    if (cur === 'INR') return s + n.toLocaleString('en-IN', {minimumFractionDigits:0, maximumFractionDigits:2});
     return s + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
 
