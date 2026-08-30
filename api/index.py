@@ -584,11 +584,8 @@ def auto_categorize(text: str, vendor: str) -> str:
 
 @app.on_event("startup")
 async def startup():
-    """Initialize database on startup."""
-    try:
-        init_database()
-    except Exception as e:
-        print(f"Startup DB error: {e}")
+    """Initialize database on startup (local dev server)."""
+    _ensure_database_initialized()
 
 
 @app.get("/")
