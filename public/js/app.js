@@ -9,20 +9,22 @@ let searchTimeout = null;
 // ─── Auth Helper ────────────────────────────────────────────────────────────
 function getAuthHeaders() {
     const headers = {};
-    if (window.Clerk && window.Clerk.session) {
-        // Get the session token synchronously if available
-        try {
-            const token = window.Clerk.session?.getAuthToken?.();
-            if (token) headers['Authorization'] = `Bearer ${token}`;
-        } catch(e) { /* token not available yet */ }
+    if (window.__clerk && window.__clerk.session) {
+        // Best effort if a token is already cached on the session object
+        const token = window.__clerk.session.getToken?.();
+        if (token && typeof token.then === 'function') {
+            // getToken() is async; callers should use authFetch() instead.
+            return headers;
+        }
+        if (token) headers['Authorization'] = `Bearer ${token}`;
     }
     return headers;
 }
 
 async function getAuthToken() {
-    if (window.Clerk && window.Clerk.session) {
+    if (window.__clerk && window.__clerk.session) {
         try {
-            return await window.Clerk.session.getToken();
+            return await window.__clerk.session.getToken();
         } catch(e) { return null; }
     }
     return null;

@@ -38,6 +38,19 @@ CLERK_SECRET_KEY = os.environ.get("CLERK_SECRET_KEY", "")
 AUTH_ENABLED = bool(CLERK_SECRET_KEY)  # Auth only if secret key is set
 USE_SQLITE_FALLBACK = not DATABASE_URL  # Auto-use SQLite locally if no Neon URL
 
+# Vercel serverless filesystems are read-only except for /tmp, so the SQLite
+# fallback must use /tmp (or a local file when running outside Vercel).
+IS_VERCEL = os.environ.get("VERCEL", "") == "1"
+_SQLITE_DB_PATH = (
+    "/tmp/invoice_scanner_pro.db"
+    if IS_VERCEL
+    else os.path.join(os.path.dirname(__file__), "..", "invoices_local.db")
+)
+
+# The FastAPI startup event is not guaranteed to run under Mangum with
+# lifespan="off", so we also bootstrap the database lazily on first use.
+_db_initialized = False
+
 # Exchange rates to INR (1 unit of currency = X INR)
 EXCHANGE_RATES_TO_INR = {
     "INR": 1.0,
@@ -154,12 +167,38 @@ def get_db_connection():
         conn.autocommit = False
         return conn
     else:
-        # Local SQLite fallback
+        # Local / serverless SQLite fallback
         import sqlite3
-        db_path = os.path.join(os.path.dirname(__file__), '..', 'invoices_local.db')
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(_SQLITE_DB_PATH)
         conn.row_factory = sqlite3.Row
         return conn
+
+
+def _ensure_database_initialized():
+    """Initialize the database once per function instance (and retry on failure).
+
+    Vercel runs the Python function in a serverless environment, so the FastAPI
+    startup event is not a reliable place for schema creation. This helper is
+    called on module import and on each request through a middleware so the
+    `invoices` table exists before any API route touches it.
+    """
+    global _db_initialized
+    if _db_initialized:
+        return True
+    try:
+        init_database()
+        _db_initialized = True
+        return True
+    except Exception as e:
+        print(f"⚠️  Database initialization failed: {e}")
+        return False
+
+
+@app.middleware("http")
+async def _bootstrap_database_middleware(request: Request, call_next):
+    """Ensure tables are created before handling API requests."""
+    _ensure_database_initialized()
+    return await call_next(request)
 
 
 def init_database():
@@ -1129,4 +1168,9 @@ async def get_currencies():
 
 
 # ─── Vercel Serverless Handler ───────────────────────────────────────────────
+
+# Bootstrap the database during the serverless cold start so the tables are
+# ready before the first request is handled (Mangum lifespan is disabled).
+_ensure_database_initialized()
+
 handler = Mangum(app, lifespan="off")

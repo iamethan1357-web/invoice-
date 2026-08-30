@@ -263,66 +263,67 @@
     <script>
         // Auth initialization — checks if Clerk is enabled and shows login if needed
         (async function initAuth() {
-            try {
-                const res = await fetch('/api/auth/config');
-                const config = await res.json();
-                
-                if (config.enabled && config.publishable_key) {
-                    // Load Clerk JS dynamically
-                    const script = document.createElement('script');
-                    script.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
-                    script.onload = async function() {
-                        await window.Clerk.load();
-                        
-                        if (window.Clerk.user) {
-                            // User is signed in — show app
-                            document.getElementById('authScreen').style.display = 'none';
-                            document.getElementById('app').style.display = 'flex';
-                            // Load app
-                            if (typeof checkHealth === 'function') checkHealth();
-                            if (typeof loadDashboard === 'function') loadDashboard();
-                            if (typeof setupUploadZone === 'function') setupUploadZone();
-                        } else {
-                            // Show login
-                            document.getElementById('authScreen').style.display = 'flex';
-                            document.getElementById('app').style.display = 'none';
-                            // Mount Clerk sign-in component
-                            window.Clerk.mountSignIn(document.getElementById('clerkMount'), {
-                                signUpUrl: '/?sign_up=true',
-                                afterSignInUrl: window.location.origin,
-                            });
-                        }
-                        
-                        // Listen for auth changes
-                        window.Clerk.addListener((payload) => {
-                            if (payload.user) {
-                                document.getElementById('authScreen').style.display = 'none';
-                                document.getElementById('app').style.display = 'flex';
-                                if (typeof loadDashboard === 'function') loadDashboard();
-                            } else {
-                                document.getElementById('authScreen').style.display = 'flex';
-                                document.getElementById('app').style.display = 'none';
-                            }
-                        });
-                    };
-                    document.head.appendChild(script);
-                    
-                    // Initialize Clerk with publishable key
-                    window.Clerk = new window.clerk.Clerk(config.publishable_key);
-                } else {
-                    // No auth — show app directly
-                    document.getElementById('app').style.display = 'flex';
-                    if (typeof checkHealth === 'function') checkHealth();
-                    if (typeof loadDashboard === 'function') loadDashboard();
-                    if (typeof setupUploadZone === 'function') setupUploadZone();
-                }
-            } catch (e) {
-                console.error('Auth init error:', e);
-                // Fallback: show app without auth
+            const showApp = () => {
+                document.getElementById('authScreen').style.display = 'none';
                 document.getElementById('app').style.display = 'flex';
                 if (typeof checkHealth === 'function') checkHealth();
                 if (typeof loadDashboard === 'function') loadDashboard();
                 if (typeof setupUploadZone === 'function') setupUploadZone();
+            };
+
+            try {
+                const res = await fetch('/api/auth/config');
+                const config = await res.json();
+
+                if (config.enabled && config.publishable_key) {
+                    // Load Clerk JS dynamically
+                    const script = document.createElement('script');
+                    script.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
+                    script.async = true;
+
+                    script.onload = async function () {
+                        try {
+                            const clerk = new window.Clerk(config.publishable_key);
+                            window.__clerk = clerk;
+                            await clerk.load();
+
+                            const render = () => {
+                                if (clerk.isSignedIn) {
+                                    // User is signed in — show app and initialize it
+                                    showApp();
+                                } else {
+                                    // Show login
+                                    document.getElementById('authScreen').style.display = 'flex';
+                                    document.getElementById('app').style.display = 'none';
+                                    clerk.mountSignIn(document.getElementById('clerkMount'), {
+                                        signUpUrl: '/?sign_up=true',
+                                        afterSignInUrl: window.location.origin,
+                                    });
+                                }
+                            };
+
+                            clerk.addListener(render);
+                            render();
+                        } catch (err) {
+                            console.error('Clerk init error:', err);
+                            showApp();
+                        }
+                    };
+
+                    script.onerror = function () {
+                        console.error('Failed to load Clerk JS');
+                        showApp();
+                    };
+
+                    document.head.appendChild(script);
+                } else {
+                    // No auth — show app directly
+                    showApp();
+                }
+            } catch (e) {
+                console.error('Auth init error:', e);
+                // Fallback: show app without auth
+                showApp();
             }
         })();
     </script>

@@ -5,6 +5,11 @@ __pycache__/
 .venv/
 venv/
 
+# Local SQLite fallback database
+invoices_local.db
+*.db-shm
+*.db-wal
+
 # Environment
 .env
 .env.local
