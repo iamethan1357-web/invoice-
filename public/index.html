@@ -141,6 +141,17 @@
                     <input type="file" id="fileInput" accept="image/*,.pdf" hidden>
                 </div>
 
+                <div class="paste-ocr card">
+                    <div class="card-header"><h3>Paste OCR text (debug)</h3></div>
+                    <div class="card-body">
+                        <p>If a scan returns blank or demo data, paste the raw OCR text here to test extraction directly.</p>
+                        <textarea id="ocrTextInput" rows="6" placeholder="Paste the raw OCR text from the 'View raw OCR text (debug)' section..."></textarea>
+                        <div class="result-actions">
+                            <button class="btn btn-secondary" onclick="scanOcrText()">Extract from Text</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Processing -->
                 <div class="processing" id="processing" style="display:none;">
                     <div class="scan-animation">

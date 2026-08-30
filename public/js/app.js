@@ -228,6 +228,31 @@ async function uploadFile(file) {
     }
 }
 
+async function scanOcrText() {
+    const text = document.getElementById('ocrTextInput').value.trim();
+    if (!text || text.length < 10) {
+        showToast('Paste some OCR text first', 'error');
+        return;
+    }
+    showToast('Extracting from OCR text...', 'info');
+    try {
+        const res = await authFetch('/api/scan/text', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, save: false })
+        });
+        const data = await res.json();
+        if (data.error) { showToast(data.error, 'error'); return; }
+        document.getElementById('uploadZone').style.display = 'none';
+        document.getElementById('processing').style.display = 'none';
+        document.getElementById('scanResult').style.display = 'block';
+        displayResult(data.data, false);
+        showToast(data.message || 'Extracted!', 'success');
+    } catch (err) {
+        showToast('Extraction failed. Please try again.', 'error');
+    }
+}
+
 function displayResult(d, isDemo) {
     document.getElementById('processing').style.display = 'none';
     document.getElementById('scanResult').style.display = 'block';

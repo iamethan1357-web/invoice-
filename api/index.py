@@ -1003,8 +1003,16 @@ class InvoiceParser:
                 continue
             # Without a header row we only trust lines with at least two numbers
             # (qty + rate + amount), which avoids dates and single-number totals.
-            if not in_section and len(amount_match) < 2:
-                continue
+            if not in_section:
+                # Flattened OCR can put the summary on the same line as the
+                # items; don't turn that whole line into one bogus item.
+                if len(line) > 160 or re.search(
+                    r"\b(?:subtotal|total|tax|gst|cgst|sgst|igst|vat|discount|balance|amount due)\b",
+                    line, re.IGNORECASE,
+                ):
+                    continue
+                if len(amount_match) < 2:
+                    continue
             last = amount_match[-1]
             amount = cls.parse_amount(last.group(0))
             # Description = everything before the final amount column.
@@ -1311,6 +1319,71 @@ async def auth_config():
     }
 
 
+@app.post("/api/scan/text")
+async def scan_text(request: Request):
+    """Extract invoice fields directly from pasted OCR text (debug/testing)."""
+    user_id = get_current_user(request)
+    body = await request.json()
+    raw_text = (body.get("text") or "").strip()
+    if len(raw_text) < 10:
+        raise HTTPException(400, "Paste at least a few lines of OCR text")
+    parsed = InvoiceParser.parse(raw_text)
+
+    # GST components (CGST/SGST/IGST) only apply to Indian INR invoices.
+    if parsed.get('currency') != 'INR':
+        parsed['cgst_amount'] = 0.0
+        parsed['sgst_amount'] = 0.0
+        parsed['igst_amount'] = 0.0
+
+    if parsed.get('category', 'Uncategorized') == 'Uncategorized':
+        category, source, confidence = ai_categorize(raw_text, parsed.get('vendor_name', ''))
+        parsed['category'] = category
+        parsed['categorization_source'] = source
+        parsed['category_confidence'] = confidence
+
+    if parsed.get('total_inr', 0) == 0 and parsed.get('total_amount', 0) > 0:
+        rate = EXCHANGE_RATES_TO_INR.get(parsed.get('currency', 'INR'), 1.0)
+        parsed['total_inr'] = round(parsed['total_amount'] * rate, 2)
+
+    invoice_id = None
+    if body.get("save") is True:
+        invoice_id = str(uuid.uuid4())
+        _save_parsed_invoice(parsed, user_id, invoice_id, raw_text, "pasted-ocr-text.txt")
+
+    return {
+        "success": True,
+        "invoice_id": invoice_id,
+        "data": {
+            "vendor_name": parsed.get("vendor_name", "Unknown"),
+            "invoice_number": parsed.get("invoice_number", ""),
+            "invoice_date": parsed.get("invoice_date"),
+            "due_date": parsed.get("due_date"),
+            "subtotal": parsed.get("subtotal", 0),
+            "tax_amount": parsed.get("tax_amount", 0),
+            "tax_rate": parsed.get("tax_rate", 0),
+            "cgst_amount": parsed.get("cgst_amount", 0),
+            "sgst_amount": parsed.get("sgst_amount", 0),
+            "igst_amount": parsed.get("igst_amount", 0),
+            "total_amount": parsed.get("total_amount", 0),
+            "currency": parsed.get("currency", "INR"),
+            "total_inr": parsed.get("total_inr", 0),
+            "category": parsed.get("category", "Uncategorized"),
+            "categorization_source": parsed.get("categorization_source", "rules"),
+            "category_confidence": parsed.get("category_confidence", 0),
+            "confidence_score": parsed.get("confidence_score", 75),
+            "line_items": parsed.get("line_items", []),
+            "raw_text": raw_text[:2000],
+        },
+        "is_demo": False,
+        "debug": {
+            "ocr_configured": bool(OCR_SPACE_API_KEY),
+            "ocr_length": len(raw_text),
+            "demo_mode": False,
+        },
+        "message": "OCR text parsed successfully" + (" and saved to your library" if invoice_id else ""),
+    }
+
+
 @app.post("/api/scan")
 async def scan_invoice(file: UploadFile = File(...), request: Request = None):
     """Upload and scan an invoice/receipt."""
@@ -1356,63 +1429,12 @@ async def scan_invoice(file: UploadFile = File(...), request: Request = None):
 
         # Save to database
         invoice_id = str(uuid.uuid4())
-        conn = get_db_connection()
-        
-        insert_sql_pg = """
-            INSERT INTO invoices (
-                id, user_id, filename, original_name, vendor_name, invoice_number,
-                invoice_date, due_date, subtotal, tax_amount, tax_rate, cgst_amount,
-                sgst_amount, igst_amount, total_amount, currency, total_inr, category,
-                categorization_source, category_confidence, payment_status, raw_text,
-                line_items, confidence_score
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)
-        """
-        insert_sql_lite = """
-            INSERT INTO invoices (
-                id, user_id, filename, original_name, vendor_name, invoice_number,
-                invoice_date, due_date, subtotal, tax_amount, tax_rate, cgst_amount,
-                sgst_amount, igst_amount, total_amount, currency, total_inr, category,
-                categorization_source, category_confidence, payment_status, raw_text,
-                line_items, confidence_score
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """
-        
-        values = (
-            invoice_id,
-            user_id,
-            hashlib.md5(content).hexdigest() + os.path.splitext(filename)[1],
-            filename,
-            parsed.get('vendor_name', 'Unknown'),
-            parsed.get('invoice_number', ''),
-            parsed.get('invoice_date'),
-            parsed.get('due_date'),
-            parsed.get('subtotal', 0),
-            parsed.get('tax_amount', 0),
-            parsed.get('tax_rate', 0),
-            parsed.get('cgst_amount', 0),
-            parsed.get('sgst_amount', 0),
-            parsed.get('igst_amount', 0),
-            parsed.get('total_amount', 0),
-            parsed.get('currency', 'INR'),
-            parsed.get('total_inr', 0),
-            parsed.get('category', 'Uncategorized'),
-            parsed.get('categorization_source', 'rules'),
-            parsed.get('category_confidence', 0),
-            'Pending',
-            (raw_text or 'Demo scan')[:10000],
-            json.dumps(parsed.get('line_items', [])),
-            parsed.get('confidence_score', 75),
+        _save_parsed_invoice(
+            parsed, user_id, invoice_id,
+            raw_text=raw_text or "Demo scan",
+            original_name=filename,
+            filename=hashlib.md5(content).hexdigest() + os.path.splitext(filename)[1],
         )
-        
-        if USE_SQLITE_FALLBACK:
-            conn.execute(insert_sql_lite, values)
-        else:
-            cur = conn.cursor()
-            cur.execute(insert_sql_pg, values)
-            cur.close()
-        
-        conn.commit()
-        conn.close()
 
         return {
             "success": True,
@@ -1439,6 +1461,11 @@ async def scan_invoice(file: UploadFile = File(...), request: Request = None):
                 "raw_text": (raw_text or "")[:2000],
             },
             "is_demo": is_demo,
+            "debug": {
+                "ocr_configured": bool(OCR_SPACE_API_KEY),
+                "ocr_length": len(raw_text or ""),
+                "demo_mode": is_demo,
+            },
             "message": "Invoice scanned successfully!" if not is_demo
                        else "Demo mode — add OCR_SPACE_API_KEY for live scanning"
         }
@@ -1809,6 +1836,65 @@ def _normalize_line_items(items) -> list:
             "amount": round(amt, 2),
         })
     return out
+
+
+def _save_parsed_invoice(parsed: dict, user_id, invoice_id: str, raw_text: str, original_name: str, filename: str = "") -> None:
+    """Persist a scanned/pasted invoice into the library (SQLite + Postgres)."""
+    conn = get_db_connection()
+    insert_sql_pg = """
+        INSERT INTO invoices (
+            id, user_id, filename, original_name, vendor_name, invoice_number,
+            invoice_date, due_date, subtotal, tax_amount, tax_rate, cgst_amount,
+            sgst_amount, igst_amount, total_amount, currency, total_inr, category,
+            categorization_source, category_confidence, payment_status, raw_text,
+            line_items, confidence_score
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)
+    """
+    insert_sql_lite = """
+        INSERT INTO invoices (
+            id, user_id, filename, original_name, vendor_name, invoice_number,
+            invoice_date, due_date, subtotal, tax_amount, tax_rate, cgst_amount,
+            sgst_amount, igst_amount, total_amount, currency, total_inr, category,
+            categorization_source, category_confidence, payment_status, raw_text,
+            line_items, confidence_score
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """
+    values = (
+        invoice_id,
+        user_id,
+        filename or hashlib.md5((raw_text or "").encode()).hexdigest() + ".txt",
+        original_name,
+        parsed.get('vendor_name', 'Unknown'),
+        parsed.get('invoice_number', ''),
+        parsed.get('invoice_date'),
+        parsed.get('due_date'),
+        parsed.get('subtotal', 0),
+        parsed.get('tax_amount', 0),
+        parsed.get('tax_rate', 0),
+        parsed.get('cgst_amount', 0),
+        parsed.get('sgst_amount', 0),
+        parsed.get('igst_amount', 0),
+        parsed.get('total_amount', 0),
+        parsed.get('currency', 'INR'),
+        parsed.get('total_inr', 0),
+        parsed.get('category', 'Uncategorized'),
+        parsed.get('categorization_source', 'rules'),
+        parsed.get('category_confidence', 0),
+        'Pending',
+        (raw_text or '')[:10000],
+        json.dumps(parsed.get('line_items', [])),
+        parsed.get('confidence_score', 75),
+    )
+    try:
+        if USE_SQLITE_FALLBACK:
+            conn.execute(insert_sql_lite, values)
+        else:
+            cur = conn.cursor()
+            cur.execute(insert_sql_pg, values)
+            cur.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _save_generated_invoice(parsed: dict, user_id, invoice_id: str) -> None:

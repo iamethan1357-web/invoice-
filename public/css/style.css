@@ -599,6 +599,26 @@ body::before {
     border: 1px solid var(--border-subtle);
 }
 
+/* ─── Paste OCR text (debug) ──────────────────────────────── */
+.paste-ocr { margin-top: 18px; }
+.paste-ocr .card-header { padding: 16px 20px; }
+.paste-ocr .card-body { padding: 16px 20px 20px; }
+.paste-ocr p { font-size: 12.5px; color: var(--text-muted); margin-bottom: 12px; }
+.paste-ocr textarea {
+    width: 100%;
+    min-height: 120px;
+    padding: 12px 14px;
+    background: var(--surface-0);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-md);
+    color: var(--text-primary);
+    font-family: 'Inter', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    resize: vertical;
+}
+.paste-ocr textarea:focus { outline: none; border-color: var(--brand-500); box-shadow: 0 0 0 3px rgba(79,70,229,0.16); }
+
 /* ─── Processing ──────────────────────────────────────────── */
 .processing {
     text-align: center;
