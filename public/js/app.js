@@ -251,6 +251,19 @@ function displayResult(d, isDemo) {
     document.getElementById('resTotal').textContent = fmtCur(d.total_amount, d.currency);
     document.getElementById('resTotalINR').textContent = fmtCur(d.total_inr, 'INR');
     document.getElementById('resCategory').textContent = d.category || 'Uncategorized';
+    const catSrc = document.getElementById('resCategorySource');
+    const catConf = d.category_confidence != null && d.category_confidence !== ''
+        ? Math.round(Number(d.category_confidence)) + '%' : '';
+    if (d.categorization_source === 'ai') {
+        catSrc.textContent = catConf ? 'AI · ' + catConf : 'AI';
+        catSrc.className = 'cat-source ai';
+    } else if (d.categorization_source === 'rules') {
+        catSrc.textContent = catConf ? 'Auto · ' + catConf : 'Auto';
+        catSrc.className = 'cat-source rules';
+    } else {
+        catSrc.textContent = '';
+        catSrc.className = 'cat-source';
+    }
     
     // Line items
     const items = d.line_items || [];

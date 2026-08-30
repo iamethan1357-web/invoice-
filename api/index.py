@@ -39,6 +39,13 @@ CLERK_SECRET_KEY = os.environ.get("CLERK_SECRET_KEY", "")
 AUTH_ENABLED = bool(CLERK_SECRET_KEY)  # Auth only if secret key is set
 USE_SQLITE_FALLBACK = not DATABASE_URL  # Auto-use SQLite locally if no Neon URL
 
+# Optional AI-powered categorization. Add AI_API_KEY (or OPENAI_API_KEY) to
+# Vercel to enable live AI categorization. Without it, the app automatically
+# falls back to a fast local keyword/scoring classifier.
+AI_API_KEY = os.environ.get("AI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+AI_API_BASE = os.environ.get("AI_API_BASE", "https://api.openai.com/v1").rstrip("/")
+AI_MODEL = os.environ.get("AI_MODEL", "gpt-4o-mini")
+
 # Vercel serverless filesystems are read-only except for /tmp, so the SQLite
 # fallback must use /tmp (or a local file when running outside Vercel).
 IS_SERVERLESS = bool(
@@ -233,6 +240,8 @@ def init_database():
                     currency VARCHAR(5) DEFAULT 'INR',
                     total_inr REAL DEFAULT 0,
                     category TEXT DEFAULT 'Uncategorized',
+                    categorization_source TEXT DEFAULT 'rules',
+                    category_confidence REAL DEFAULT 0,
                     payment_status TEXT DEFAULT 'Pending',
                     notes TEXT,
                     raw_text TEXT,
@@ -243,9 +252,12 @@ def init_database():
                 )
             """)
             # Add columns that may be missing on existing databases (migration)
-            for col in ["user_id", "cgst_amount", "sgst_amount", "igst_amount"]:
+            for col, cd in [("user_id", "TEXT"), ("cgst_amount", "REAL DEFAULT 0"),
+                            ("sgst_amount", "REAL DEFAULT 0"), ("igst_amount", "REAL DEFAULT 0"),
+                            ("categorization_source", "TEXT DEFAULT 'rules'"),
+                            ("category_confidence", "REAL DEFAULT 0")]:
                 try:
-                    conn.execute(f"ALTER TABLE invoices ADD COLUMN {col} {'TEXT' if col == 'user_id' else 'REAL DEFAULT 0'}")
+                    conn.execute(f"ALTER TABLE invoices ADD COLUMN {col} {cd}")
                 except:
                     pass  # Column already exists
             conn.commit()
@@ -272,6 +284,8 @@ def init_database():
                     currency VARCHAR(5) DEFAULT 'INR',
                     total_inr DECIMAL(14,2) DEFAULT 0,
                     category TEXT DEFAULT 'Uncategorized',
+                    categorization_source TEXT DEFAULT 'rules',
+                    category_confidence DECIMAL(5,1) DEFAULT 0,
                     payment_status TEXT DEFAULT 'Pending',
                     notes TEXT,
                     raw_text TEXT,
@@ -282,9 +296,18 @@ def init_database():
                 )
             """)
             # Add columns that may be missing on existing databases (migration)
-            for col in ["user_id", "cgst_amount", "sgst_amount", "igst_amount"]:
+            for col in ["user_id", "cgst_amount", "sgst_amount", "igst_amount",
+                        "categorization_source", "category_confidence"]:
                 try:
-                    cur.execute(f"ALTER TABLE invoices ADD COLUMN IF NOT EXISTS {col} TEXT" if col == "user_id" else f"ALTER TABLE invoices ADD COLUMN IF NOT EXISTS {col} DECIMAL(14,2) DEFAULT 0")
+                    if col == "user_id":
+                        ddl = "TEXT"
+                    elif col == "categorization_source":
+                        ddl = "TEXT DEFAULT 'rules'"
+                    elif col == "category_confidence":
+                        ddl = "DECIMAL(5,1) DEFAULT 0"
+                    else:
+                        ddl = "DECIMAL(14,2) DEFAULT 0"
+                    cur.execute(f"ALTER TABLE invoices ADD COLUMN IF NOT EXISTS {col} {ddl}")
                 except:
                     pass
             cur.execute("CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(created_at DESC)")
@@ -906,25 +929,100 @@ def get_mime_type(ext: str) -> str:
 # ─── Smart Category Detection ────────────────────────────────────────────────
 
 CATEGORY_KEYWORDS = {
-    "Electronics": ["laptop", "computer", "phone", "monitor", "keyboard", "mouse", "electronics", "dell", "hp", "apple", "samsung"],
-    "Cloud & Infrastructure": ["aws", "azure", "google cloud", "hosting", "server", "cloud", "domain", "ssl"],
-    "Office Supplies": ["paper", "pen", "stapler", "folder", "printer", "toner", "ink", "office"],
-    "Marketing & Printing": ["print", "brochure", "banner", "business card", "marketing", "advertising", "flyer"],
-    "Software & SaaS": ["software", "subscription", "license", "saas", "figma", "slack", "notion", "canva"],
-    "Utilities & Energy": ["electricity", "power", "water", "gas", "internet", "broadband", "phone bill"],
-    "Travel & Transport": ["flight", "hotel", "uber", "ola", "taxi", "travel", "train", "airline"],
-    "Food & Catering": ["food", "restaurant", "catering", "lunch", "dinner", "meal", "swiggy", "zomato"],
-    "Professional Services": ["consulting", "legal", "audit", "accounting", "CA", "lawyer", "advisory"],
-    "Health & Medical": ["medical", "hospital", "pharmacy", "medicine", "health", "clinic", "doctor"],
+    "Electronics": ["laptop", "computer", "phone", "monitor", "keyboard", "mouse", "electronics", "dell", "hp", "apple", "samsung", "gadget", "hardware"],
+    "Cloud & Infrastructure": ["aws", "azure", "google cloud", "hosting", "server", "cloud", "domain", "ssl", "cdn", "vps", "kubernetes"],
+    "Office Supplies": ["paper", "pen", "stapler", "folder", "printer", "toner", "ink", "office", "stationery", "furniture"],
+    "Marketing & Printing": ["print", "brochure", "banner", "business card", "marketing", "advertising", "flyer", "adwords", "seo"],
+    "Software & SaaS": ["software", "subscription", "license", "saas", "figma", "slack", "notion", "canva", "zoom", "microsoft"],
+    "Utilities & Energy": ["electricity", "power", "water", "gas", "internet", "broadband", "phone bill", "mobile recharge", "diesel", "fuel"],
+    "Travel & Transport": ["flight", "hotel", "uber", "ola", "taxi", "travel", "train", "airline", "cab", "fuel", "parking"],
+    "Food & Catering": ["food", "restaurant", "catering", "lunch", "dinner", "meal", "swiggy", "zomato", "hotel", "grocery"],
+    "Professional Services": ["consulting", "legal", "audit", "accounting", "CA", "lawyer", "advisory", "chartered", "tax consultant", "registration"],
+    "Health & Medical": ["medical", "hospital", "pharmacy", "medicine", "health", "clinic", "doctor", "lab", "insurance"],
+    "Logistics & Shipping": ["logistics", "courier", "shipping", "freight", "delivery", "dhl", "fedex", "blue dart", "transport"],
+    "Banking & Finance": ["bank", "loan", "interest", "emi", "insurance premium", "credit card", "emi", "payment gateway", "razorpay"],
+    "Construction & Repairs": ["construction", "repair", "maintenance", "plumbing", "electrical contractor", "painting", "labour", "installation"],
+    "Rent & Lease": ["rent", "lease", "maintenance charges", "society", "property"],
 }
 
-def auto_categorize(text: str, vendor: str) -> str:
-    combined = (text + " " + vendor).lower()
+CATEGORY_LIST = sorted(CATEGORY_KEYWORDS.keys())
+
+
+def keyword_categorize(text: str, vendor: str) -> str:
+    """Local, fast keyword/scoring classifier. Returns (category, confidence)."""
+    combined = (f"{text} {vendor}").lower()
+    best, best_score = "Uncategorized", 0
     for category, keywords in CATEGORY_KEYWORDS.items():
+        score = 0
         for kw in keywords:
             if kw in combined:
-                return category
-    return "Uncategorized"
+                score += 3 if len(kw) >= 5 else 1
+        if score > best_score:
+            best, best_score = category, score
+    confidence = round(min(0.99, 0.45 + 0.12 * best_score) * 100)
+    return best, confidence
+
+
+def ai_categorize(text: str, vendor: str) -> tuple:
+    """AI-powered category classification with a local fallback.
+
+    Uses an OpenAI-compatible chat-completions endpoint when AI_API_KEY is set.
+    Otherwise (or on any error) returns the fast local classifier result so the
+    app keeps working without an AI key.
+    """
+    local_category, local_conf = keyword_categorize(text, vendor)
+    if not AI_API_KEY:
+        return local_category, "rules", local_conf
+
+    allowed = ", ".join(f'"{c}"' for c in CATEGORY_LIST)
+    snippet = (text or "")[:4000]
+    prompt = (
+        "Classify the following invoice text into exactly one of these business expense categories: "
+        f"{allowed}. "
+        "Respond only with a JSON object: {\"category\": \"...\", \"confidence\": 0-100}. "
+        "If uncertain, still choose the best category and keep the confidence below 60. "
+        f"\n\nVendor: {vendor or 'Unknown'}\nInvoice text:\n{snippet or '(no OCR text available)'}"
+    )
+
+    try:
+        response = requests.post(
+            f"{AI_API_BASE}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {AI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": AI_MODEL,
+                "messages": [
+                    {"role": "system", "content": "You are a finance category assistant for invoice bookkeeping."},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0,
+                "max_tokens": 60,
+            },
+            timeout=20,
+        )
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"].strip()
+        m = re.search(r"\{.*\}", content, re.DOTALL)
+        if not m:
+            print("⚠️  AI categorization: no JSON in response")
+            return local_category, "rules", local_conf
+        payload = json.loads(m.group(0))
+        category = str(payload.get("category", "")).strip()
+        if category not in CATEGORY_LIST:
+            return local_category, "rules", local_conf
+        confidence = int(float(payload.get("confidence", local_conf)))
+        confidence = max(0, min(100, confidence))
+        return category, "ai", confidence
+    except Exception as e:
+        print(f"⚠️  AI categorization failed ({e}); using local rules")
+        return local_category, "rules", local_conf
+
+
+def auto_categorize(text: str, vendor: str) -> str:
+    """Keep the legacy helper for compatibility (returns just the category)."""
+    return keyword_categorize(text, vendor)[0]
 
 
 # ─── API Routes ──────────────────────────────────────────────────────────────
@@ -1000,10 +1098,15 @@ async def scan_invoice(file: UploadFile = File(...), request: Request = None):
             parsed = _generate_demo_result(filename)
             is_demo = True
 
-        # Auto-categorize
+        # Auto-categorize (AI when configured, local rules otherwise)
         if parsed.get('category', 'Uncategorized') == 'Uncategorized':
-            parsed['category'] = auto_categorize(raw_text or "", parsed.get('vendor_name', ''))
-        
+            category, source, confidence = ai_categorize(
+                raw_text or "", parsed.get('vendor_name', '')
+            )
+            parsed['category'] = category
+            parsed['categorization_source'] = source
+            parsed['category_confidence'] = confidence
+
         # Ensure total_inr is calculated
         if parsed.get('total_inr', 0) == 0 and parsed.get('total_amount', 0) > 0:
             rate = EXCHANGE_RATES_TO_INR.get(parsed.get('currency', 'INR'), 1.0)
@@ -1018,16 +1121,18 @@ async def scan_invoice(file: UploadFile = File(...), request: Request = None):
                 id, user_id, filename, original_name, vendor_name, invoice_number,
                 invoice_date, due_date, subtotal, tax_amount, tax_rate, cgst_amount,
                 sgst_amount, igst_amount, total_amount, currency, total_inr, category,
-                payment_status, raw_text, line_items, confidence_score
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                categorization_source, category_confidence, payment_status, raw_text,
+                line_items, confidence_score
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """
         insert_sql_lite = """
             INSERT INTO invoices (
                 id, user_id, filename, original_name, vendor_name, invoice_number,
                 invoice_date, due_date, subtotal, tax_amount, tax_rate, cgst_amount,
                 sgst_amount, igst_amount, total_amount, currency, total_inr, category,
-                payment_status, raw_text, line_items, confidence_score
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                categorization_source, category_confidence, payment_status, raw_text,
+                line_items, confidence_score
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """
         
         values = (
@@ -1049,6 +1154,8 @@ async def scan_invoice(file: UploadFile = File(...), request: Request = None):
             parsed.get('currency', 'INR'),
             parsed.get('total_inr', 0),
             parsed.get('category', 'Uncategorized'),
+            parsed.get('categorization_source', 'rules'),
+            parsed.get('category_confidence', 0),
             'Pending',
             (raw_text or 'Demo scan')[:10000],
             json.dumps(parsed.get('line_items', [])),
@@ -1083,6 +1190,8 @@ async def scan_invoice(file: UploadFile = File(...), request: Request = None):
                 "currency": parsed.get('currency', 'INR'),
                 "total_inr": parsed.get('total_inr', 0),
                 "category": parsed.get('category', 'Uncategorized'),
+                "categorization_source": parsed.get('categorization_source', 'rules'),
+                "category_confidence": parsed.get('category_confidence', 0),
                 "confidence_score": parsed.get('confidence_score', 75),
                 "line_items": parsed.get('line_items', []),
                 "raw_text": (raw_text or "")[:2000],
@@ -1216,7 +1325,7 @@ async def list_invoices(
     
     # Convert types
     for inv in invoices:
-        for k in ['subtotal', 'tax_amount', 'tax_rate', 'cgst_amount', 'sgst_amount', 'igst_amount', 'total_amount', 'total_inr', 'confidence_score']:
+        for k in ['subtotal', 'tax_amount', 'tax_rate', 'cgst_amount', 'sgst_amount', 'igst_amount', 'total_amount', 'total_inr', 'category_confidence', 'confidence_score']:
             if inv.get(k) is not None:
                 inv[k] = float(inv[k])
         if isinstance(inv.get('line_items'), str):
@@ -1266,7 +1375,7 @@ async def get_invoice(invoice_id: str, request: Request):
         raise HTTPException(404, "Invoice not found")
     
     inv = dict(row)
-    for k in ['subtotal', 'tax_amount', 'tax_rate', 'cgst_amount', 'sgst_amount', 'igst_amount', 'total_amount', 'total_inr', 'confidence_score']:
+    for k in ['subtotal', 'tax_amount', 'tax_rate', 'cgst_amount', 'sgst_amount', 'igst_amount', 'total_amount', 'total_inr', 'category_confidence', 'confidence_score']:
         if inv.get(k) is not None:
             inv[k] = float(inv[k])
     if isinstance(inv.get('line_items'), str):
@@ -1413,7 +1522,7 @@ async def dashboard_stats(request: Request):
         recent = []
         for r in recent_rows:
             inv = dict(r)
-            for k in ['subtotal', 'tax_amount', 'tax_rate', 'cgst_amount', 'sgst_amount', 'igst_amount', 'total_amount', 'total_inr', 'confidence_score']:
+            for k in ['subtotal', 'tax_amount', 'tax_rate', 'cgst_amount', 'sgst_amount', 'igst_amount', 'total_amount', 'total_inr', 'category_confidence', 'confidence_score']:
                 if inv.get(k) is not None:
                     inv[k] = float(inv[k])
             if isinstance(inv.get('line_items'), str):
@@ -1454,7 +1563,7 @@ async def dashboard_stats(request: Request):
         recent = []
         for r in cur.fetchall():
             inv = dict(r)
-            for k in ['subtotal', 'tax_amount', 'tax_rate', 'cgst_amount', 'sgst_amount', 'igst_amount', 'total_amount', 'total_inr', 'confidence_score']:
+            for k in ['subtotal', 'tax_amount', 'tax_rate', 'cgst_amount', 'sgst_amount', 'igst_amount', 'total_amount', 'total_inr', 'category_confidence', 'confidence_score']:
                 if inv.get(k) is not None:
                     inv[k] = float(inv[k])
             if isinstance(inv.get('line_items'), str):
@@ -1532,7 +1641,8 @@ def _fetch_all_invoices():
     conn.close()
     for inv in rows:
         for k in ['subtotal', 'tax_amount', 'tax_rate', 'cgst_amount', 'sgst_amount',
-                  'igst_amount', 'total_amount', 'total_inr', 'confidence_score']:
+                  'igst_amount', 'total_amount', 'total_inr', 'category_confidence',
+                  'confidence_score']:
             if inv.get(k) is not None:
                 inv[k] = float(inv[k])
         if isinstance(inv.get('line_items'), str):
