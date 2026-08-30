@@ -167,7 +167,7 @@ invoice-scanner-pro/
 ├── public/                    # Static files served by Vercel CDN
 │   ├── index.html            # Main dashboard UI
 │   ├── css/
-│   │   └── style.css         # Complete styling (dark theme)
+│   │   └── style.css         # Complete styling (light theme)
 │   └── js/
 │       └── app.js            # Frontend logic
 ├── vercel.json               # Vercel routing & config

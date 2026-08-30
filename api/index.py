@@ -1745,8 +1745,6 @@ DEFAULT_SETTINGS = {
     "invoice_footer": "Thank you for your business!",
     "default_payment_status": "Pending",
     "accent_color": "#4f46e5",
-    # Preferences
-    "theme": "dark",
 }
 
 
