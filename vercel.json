@@ -4,7 +4,7 @@
     {
       "src": "api/index.py",
       "use": "@vercel/python",
-      "config": { "maxLambdaSize": "50mb" }
+      "config": { "maxLambdaSize": "150mb" }
     },
     {
       "src": "public/**",
@@ -21,12 +21,12 @@
       "dest": "/public/$1"
     },
     {
+      "src": "/",
+      "dest": "/public/index.html"
+    },
+    {
       "src": "/(.*)",
       "dest": "/public/$1"
     }
-  ],
-  "env": {
-    "DATABASE_URL": "@database_url",
-    "OCR_SPACE_API_KEY": "@ocr_space_api_key"
-  }
+  ]
 }

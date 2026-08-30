@@ -48,10 +48,24 @@
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                 All Invoices
             </a>
+            <a href="#" class="nav-item" data-page="generator" onclick="showPage('generator')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="10" y2="15"/></svg>
+                Invoice Generator
+            </a>
             <div class="nav-section-label">Insights</div>
             <a href="#" class="nav-item" data-page="analytics" onclick="showPage('analytics')">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
                 Analytics
+            </a>
+            <div class="nav-section-label">Compliance</div>
+            <a href="#" class="nav-item" data-page="gst" onclick="showPage('gst')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5c-5 0-9 3-9 7s4 7 9 7 9-3 9-7-4-7-9-7z"/><path d="M12 5v14"/><path d="M6 12h12"/></svg>
+                GST Reports
+            </a>
+            <div class="nav-section-label">System</div>
+            <a href="#" class="nav-item" data-page="settings" onclick="showPage('settings')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                Settings
             </a>
         </nav>
         <div class="sidebar-footer">
@@ -69,11 +83,22 @@
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
             </button>
             <div class="top-bar-right">
+                <button class="export-btn" onclick="exportTally()" title="Download Tally XML">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Tally XML
+                </button>
+                <button class="export-btn" onclick="exportQuickBooks()" title="Download QuickBooks IIF">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    QuickBooks
+                </button>
                 <button class="btn-icon" onclick="exportCSV()" title="Export CSV">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 </button>
                 <button class="btn-icon" onclick="showPage('scan')" title="New scan">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
+                <button class="btn-icon" onclick="showPage('settings')" title="Settings">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 </button>
                 <div class="user-avatar">JP</div>
             </div>
@@ -124,6 +149,17 @@
                     <input type="file" id="fileInput" accept="image/*,.pdf" hidden>
                 </div>
 
+                <div class="paste-ocr card">
+                    <div class="card-header"><h3>Paste OCR text (debug)</h3></div>
+                    <div class="card-body">
+                        <p>If a scan returns blank or demo data, paste the raw OCR text here to test extraction directly.</p>
+                        <textarea id="ocrTextInput" rows="6" placeholder="Paste the raw OCR text from the 'View raw OCR text (debug)' section..."></textarea>
+                        <div class="result-actions">
+                            <button class="btn btn-secondary" onclick="scanOcrText()">Extract from Text</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Processing -->
                 <div class="processing" id="processing" style="display:none;">
                     <div class="scan-animation">
@@ -157,13 +193,14 @@
                         <div class="data-item"><label>Vendor</label><span id="resVendor">—</span></div>
                         <div class="data-item"><label>Invoice #</label><span id="resInvoiceNo">—</span></div>
                         <div class="data-item"><label>Date</label><span id="resDate">—</span></div>
+                        <div class="data-item"><label>Due Date</label><span id="resDueDate">—</span></div>
                         <div class="data-item"><label>Currency</label><span id="resCurrency">—</span></div>
                         <div class="data-item"><label>Subtotal</label><span id="resSubtotal">—</span></div>
                         <div class="data-item"><label>Tax Rate</label><span id="resTaxRate">—</span></div>
                         <div class="data-item"><label>Tax Amount</label><span id="resTaxAmount">—</span></div>
                         <div class="data-item highlight"><label>Total Amount</label><span id="resTotal">—</span></div>
                         <div class="data-item"><label>Total (INR)</label><span id="resTotalINR">—</span></div>
-                        <div class="data-item"><label>Category</label><span id="resCategory">—</span></div>
+                        <div class="data-item"><label>Category <span class="cat-source" id="resCategorySource"></span></label><span id="resCategory">—</span></div>
                     </div>
                     <div class="line-items-section" id="lineItemsSection" style="display:none;">
                         <h4>Line Items</h4>
@@ -173,6 +210,10 @@
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                         Demo mode — add <code>OCR_SPACE_API_KEY</code> for real extraction
                     </div>
+                    <details class="raw-text" id="rawTextSection" style="display:none;">
+                        <summary>View raw OCR text (debug)</summary>
+                        <pre id="rawText"></pre>
+                    </details>
                     <div class="result-actions">
                         <button class="btn btn-primary" onclick="showPage('invoices')">View in Dashboard</button>
                         <button class="btn btn-secondary" onclick="resetScan()">Scan Another</button>
@@ -213,6 +254,74 @@
             <div class="pagination" id="pagination"></div>
         </div>
 
+        <!-- ═══ Invoice Generator Page ═══ -->
+        <div class="page" id="page-generator">
+            <div class="page-header">
+                <h1>Invoice Generator</h1>
+                <p class="page-subtitle">Create a professional invoice from a reusable template, preview it, then print or save it</p>
+            </div>
+            <div class="generator-layout">
+                <div class="card generator-form">
+                    <div class="card-header"><h3>Invoice Details</h3></div>
+                    <div class="card-body" style="padding:20px 20px 24px;">
+                        <label class="gen-label">Template</label>
+                        <div class="template-row">
+                            <select id="tplSelect" class="gen-input" onchange="selectTemplate()"></select>
+                            <button class="btn btn-secondary btn-sm" onclick="openTemplateManager()">Manage</button>
+                        </div>
+                        <div class="gen-section">Invoice</div>
+                        <div class="gen-grid">
+                            <div><label>Invoice #</label><input class="gen-input" id="genNumber" placeholder="INV-0001"></div>
+                            <div><label>Date</label><input class="gen-input" id="genDate" type="date"></div>
+                            <div><label>Due Date</label><input class="gen-input" id="genDue" type="date"></div>
+                            <div><label>Currency</label><select class="gen-input" id="genCurrency"></select></div>
+                        </div>
+                        <div class="gen-section">Customer</div>
+                        <div class="gen-grid">
+                            <div class="full"><label>Name</label><input class="gen-input" id="genCustomerName" placeholder="Acme Pvt Ltd"></div>
+                            <div class="full"><label>Address</label><textarea class="gen-input" id="genCustomerAddress" rows="2" placeholder="Street, City, State, PIN"></textarea></div>
+                            <div><label>Email</label><input class="gen-input" id="genCustomerEmail"></div>
+                            <div><label>Phone</label><input class="gen-input" id="genCustomerPhone"></div>
+                            <div><label>GSTIN</label><input class="gen-input" id="genCustomerGstin"></div>
+                        </div>
+                        <div class="gen-section">Line Items</div>
+                        <table class="line-items-table gen-items-table">
+                            <thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th><th></th></tr></thead>
+                            <tbody id="genItemsBody"></tbody>
+                        </table>
+                        <button class="btn btn-secondary btn-sm" onclick="addItemRow()" style="margin-top:10px;">+ Add Item</button>
+                        <div class="gen-grid" style="margin-top:16px;">
+                            <div><label>Tax Rate %</label><input class="gen-input" id="genTaxRate" type="number" min="0" step="0.01" value="18"></div>
+                            <div><label>Discount %</label><input class="gen-input" id="genDiscount" type="number" min="0" step="0.01" value="0"></div>
+                            <div><label>Category</label><select class="gen-input" id="genCategory"></select></div>
+                            <div><label>Status</label><select class="gen-input" id="genStatus"><option value="Pending">Pending</option><option value="Paid">Paid</option></select></div>
+                        </div>
+                        <div class="gen-section">Notes</div>
+                        <textarea class="gen-input" id="genNotes" rows="2"></textarea>
+                        <div class="gen-section">Terms</div>
+                        <textarea class="gen-input" id="genTerms" rows="2"></textarea>
+                        <div class="gen-section">Footer</div>
+                        <input class="gen-input" id="genFooter">
+                        <label class="gen-check"><input type="checkbox" id="genSave" checked> Save generated invoice to your library</label>
+                        <div class="result-actions">
+                            <button class="btn btn-primary" onclick="generateInvoice()">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                                Generate Preview
+                            </button>
+                            <button class="btn btn-secondary" onclick="printInvoice()">Print / PDF</button>
+                            <button class="btn btn-secondary" onclick="downloadInvoiceHTML()">Download HTML</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card preview-panel">
+                    <div class="card-header"><h3>Live Preview</h3><span style="font-size:11px;color:var(--text-muted)" id="genSaveStatus"></span></div>
+                    <div class="card-body" style="padding:12px;">
+                        <iframe id="invoicePreviewFrame" class="invoice-preview-frame" title="Invoice preview"></iframe>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- ═══ Analytics Page ═══ -->
         <div class="page" id="page-analytics">
             <div class="page-header">
@@ -238,6 +347,154 @@
                 </div>
             </div>
         </div>
+
+        <!-- ═══ GST Reports Page ═══ -->
+        <div class="page" id="page-gst">
+            <div class="page-header">
+                <h1>GST Reports</h1>
+                <p class="page-subtitle">GST summary for Indian businesses — taxable value, CGST, SGST &amp; IGST</p>
+            </div>
+            <div class="filters-bar">
+                <select class="filter-select" id="gstYear" onchange="loadGSTReport()">
+                    <option value="">All Years</option>
+                    <option value="2024">2024</option>
+                    <option value="2025">2025</option>
+                    <option value="2026">2026</option>
+                    <option value="2027">2027</option>
+                </select>
+                <select class="filter-select" id="gstMonth" onchange="loadGSTReport()">
+                    <option value="">All Months</option>
+                    <option value="01">January</option><option value="02">February</option>
+                    <option value="03">March</option><option value="04">April</option>
+                    <option value="05">May</option><option value="06">June</option>
+                    <option value="07">July</option><option value="08">August</option>
+                    <option value="09">September</option><option value="10">October</option>
+                    <option value="11">November</option><option value="12">December</option>
+                </select>
+                <select class="filter-select" id="gstStatus" onchange="loadGSTReport()">
+                    <option value="">All Status</option>
+                    <option value="Paid">Paid</option>
+                    <option value="Pending">Pending</option>
+                </select>
+                <button class="btn btn-secondary" onclick="loadGSTReport()">Refresh</button>
+            </div>
+            <div class="stats-grid" id="gstStats">
+                <div class="stat-card"><div class="stat-card-inner"><div class="stat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><div class="stat-body"><span class="stat-value" id="gstInvoices">—</span><span class="stat-label">Invoices</span></div></div></div>
+                <div class="stat-card"><div class="stat-card-inner"><div class="stat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="stat-body"><span class="stat-value" id="gstTaxable">—</span><span class="stat-label">Taxable Value</span></div></div></div>
+                <div class="stat-card"><div class="stat-card-inner"><div class="stat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div><div class="stat-body"><span class="stat-value" id="gstTotalTax">—</span><span class="stat-label">Total Tax</span></div></div></div>
+                <div class="stat-card"><div class="stat-card-inner"><div class="stat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div><div class="stat-body"><span class="stat-value" id="gstInvoiceAmt">—</span><span class="stat-label">Invoice Amount</span></div></div></div>
+            </div>
+            <div class="report-grid">
+                <div class="card">
+                    <div class="card-header"><h3>Rate-wise GST Summary</h3></div>
+                    <div class="card-body"><div class="table-container" style="border:none;border-radius:0;">
+                        <table class="invoice-table">
+                            <thead><tr><th>Rate</th><th>Invoices</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total Tax</th></tr></thead>
+                            <tbody id="gstRateTable"><tr><td colspan="7" class="loading">Loading...</td></tr></tbody>
+                        </table>
+                    </div></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3>Category-wise GST</h3></div>
+                    <div class="card-body"><div class="table-container" style="border:none;border-radius:0;">
+                        <table class="invoice-table">
+                            <thead><tr><th>Category</th><th>Invoices</th><th>Taxable</th><th>Total Tax</th></tr></thead>
+                            <tbody id="gstCategoryTable"><tr><td colspan="4" class="loading">Loading...</td></tr></tbody>
+                        </table>
+                    </div></div>
+                </div>
+                <div class="card full-width">
+                    <div class="card-header"><h3>Monthly GST Summary</h3></div>
+                    <div class="card-body"><div class="table-container" style="border:none;border-radius:0;">
+                        <table class="invoice-table">
+                            <thead><tr><th>Month</th><th>Invoices</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total Tax</th></tr></thead>
+                            <tbody id="gstMonthTable"><tr><td colspan="7" class="loading">Loading...</td></tr></tbody>
+                        </table>
+                    </div></div>
+                </div>
+                <div class="card full-width">
+                    <div class="card-header"><h3>Accounting Exports</h3></div>
+                    <div class="card-body" style="padding:20px 20px;">
+                        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">Import directly into Tally or QuickBooks (Desktop) to post purchases and GST.</p>
+                        <div class="result-actions">
+                            <button class="btn btn-primary" onclick="exportTally()">Export Tally XML</button>
+                            <button class="btn btn-secondary" onclick="exportQuickBooks()">Export QuickBooks IIF</button>
+                            <button class="btn btn-secondary" onclick="exportCSV()">Export CSV</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- ═══ Settings Page ═══ -->
+        <div class="page" id="page-settings">
+            <div class="page-header">
+                <h1>Settings</h1>
+                <p class="page-subtitle">Configure your business, invoice defaults, preferences and integrations</p>
+            </div>
+            <div class="settings-layout">
+                <div class="card settings-form">
+                    <div class="card-header"><h3>Business Profile</h3></div>
+                    <div class="card-body settings-body">
+                        <div class="gen-grid">
+                            <div class="full"><label>Business Name</label><input class="gen-input" id="setBusinessName" placeholder="Your Company Pvt Ltd"></div>
+                            <div class="full"><label>Address</label><textarea class="gen-input" id="setBusinessAddress" rows="2" placeholder="12 MG Road, Jaipur, Rajasthan 302001"></textarea></div>
+                            <div><label>Email</label><input class="gen-input" id="setBusinessEmail" placeholder="billing@yourcompany.in"></div>
+                            <div><label>Phone</label><input class="gen-input" id="setBusinessPhone" placeholder="+91 98765 43210"></div>
+                            <div><label>GSTIN</label><input class="gen-input" id="setBusinessGstin" placeholder="08AABCD1234F1Z5"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card settings-form">
+                    <div class="card-header"><h3>Invoice Defaults</h3></div>
+                    <div class="card-body settings-body">
+                        <div class="gen-grid">
+                            <div><label>Default Currency</label><select class="gen-input" id="setCurrency"></select></div>
+                            <div><label>Default Tax Rate %</label><input class="gen-input" id="setTaxRate" type="number" step="0.01" value="18"></div>
+                            <div><label>Default Discount %</label><input class="gen-input" id="setDiscountRate" type="number" step="0.01" value="0"></div>
+                            <div><label>Default Status</label><select class="gen-input" id="setDefaultStatus"><option value="Pending">Pending</option><option value="Paid">Paid</option><option value="Overdue">Overdue</option></select></div>
+                            <div class="full"><label>Payment Terms</label><input class="gen-input" id="setTerms" placeholder="Payment due within 30 days"></div>
+                            <div class="full"><label>Invoice Footer</label><input class="gen-input" id="setFooter" placeholder="Thank you for your business!"></div>
+                            <div><label>Accent Color</label><input class="gen-input" id="setAccent" type="color" value="#4f46e5" style="height:38px;padding:4px;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card settings-form">
+                    <div class="card-header"><h3>Preferences</h3></div>
+                    <div class="card-body settings-body">
+                        <div class="gen-grid">
+                            <div><label>Theme</label><select class="gen-input" id="setTheme"><option value="dark">Dark</option><option value="light">Light</option></select></div>
+                        </div>
+                        <p class="settings-hint">Theme is applied immediately and saved with your settings.</p>
+                    </div>
+                </div>
+
+                <div class="card settings-form">
+                    <div class="card-header"><h3>Integrations &amp; Health</h3></div>
+                    <div class="card-body settings-body">
+                        <div class="settings-status" id="settingsHealth"><div class="loading">Loading status...</div></div>
+                    </div>
+                </div>
+
+                <div class="card settings-form">
+                    <div class="card-header"><h3>Data Management</h3></div>
+                    <div class="card-body settings-body">
+                        <p class="settings-hint">Export all stored invoices for accounting or backup.</p>
+                        <div class="result-actions">
+                            <button class="btn btn-primary" onclick="exportCSV()">Export CSV</button>
+                            <button class="btn btn-secondary" onclick="exportTally()">Export Tally XML</button>
+                            <button class="btn btn-secondary" onclick="exportQuickBooks()">Export QuickBooks IIF</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-actions">
+                    <button class="btn btn-primary btn-lg" onclick="saveSettings()">Save Settings</button>
+                    <button class="btn btn-secondary btn-lg" onclick="loadSettings()">Reset View</button>
+                </div>
+            </div>
+        </div>
     </main>
 
     <!-- ═══ Modal ═══ -->
@@ -248,6 +505,58 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary btn-sm" onclick="closeModal()">Close</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteInvoice()">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Template Manager Modal ═══ -->
+    <div class="modal-overlay" id="templateModalOverlay" onclick="closeTemplateManager()">
+        <div class="modal modal-lg" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2>Invoice Templates</h2>
+                <button class="modal-close" onclick="closeTemplateManager()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="template-manager">
+                    <div class="template-list" id="templateList"><div class="loading">Loading templates...</div></div>
+                    <div class="template-editor">
+                        <h4 id="templateEditorTitle">New Template</h4>
+                        <label class="gen-label">Template Name</label>
+                        <input class="gen-input" id="tplName" placeholder="Business Default">
+                        <div class="gen-section">Your Business</div>
+                        <div class="gen-grid">
+                            <div class="full"><label>Business Name</label><input class="gen-input" id="tplFromName"></div>
+                            <div class="full"><label>Address</label><textarea class="gen-input" id="tplFromAddress" rows="2"></textarea></div>
+                            <div><label>Email</label><input class="gen-input" id="tplFromEmail"></div>
+                            <div><label>Phone</label><input class="gen-input" id="tplFromPhone"></div>
+                            <div><label>GSTIN</label><input class="gen-input" id="tplFromGstin"></div>
+                        </div>
+                        <div class="gen-section">Default Customer (optional)</div>
+                        <div class="gen-grid">
+                            <div class="full"><label>Customer Name</label><input class="gen-input" id="tplToName"></div>
+                            <div class="full"><label>Address</label><textarea class="gen-input" id="tplToAddress" rows="2"></textarea></div>
+                            <div><label>Email</label><input class="gen-input" id="tplToEmail"></div>
+                            <div><label>Phone</label><input class="gen-input" id="tplToPhone"></div>
+                            <div><label>GSTIN</label><input class="gen-input" id="tplToGstin"></div>
+                        </div>
+                        <div class="gen-section">Defaults</div>
+                        <div class="gen-grid">
+                            <div><label>Currency</label><select class="gen-input" id="tplCurrency"></select></div>
+                            <div><label>Tax Rate %</label><input class="gen-input" id="tplTaxRate" type="number" value="18"></div>
+                            <div><label>Discount %</label><input class="gen-input" id="tplDiscount" type="number" value="0"></div>
+                            <div><label>Accent Color</label><input class="gen-input" id="tplAccent" type="color" value="#4f46e5" style="height:38px;padding:4px;"></div>
+                        </div>
+                        <div class="gen-section">Default Line Items <span style="font-weight:400;font-size:11px;color:var(--text-muted)">(one per line: Description | Qty | Rate)</span></div>
+                        <textarea class="gen-input" id="tplLineItems" rows="3" placeholder="Consulting Service | 1 | 15000"></textarea>
+                        <div class="gen-section">Terms & Footer</div>
+                        <textarea class="gen-input" id="tplTerms" rows="2"></textarea>
+                        <input class="gen-input" id="tplFooter" style="margin-top:8px;">
+                        <div class="result-actions">
+                            <button class="btn btn-primary" id="saveTemplateBtn" onclick="saveTemplate()">Save Template</button>
+                            <button class="btn btn-secondary" onclick="resetTemplateEditor()">Clear</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -263,66 +572,67 @@
     <script>
         // Auth initialization — checks if Clerk is enabled and shows login if needed
         (async function initAuth() {
-            try {
-                const res = await fetch('/api/auth/config');
-                const config = await res.json();
-                
-                if (config.enabled && config.publishable_key) {
-                    // Load Clerk JS dynamically
-                    const script = document.createElement('script');
-                    script.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
-                    script.onload = async function() {
-                        await window.Clerk.load();
-                        
-                        if (window.Clerk.user) {
-                            // User is signed in — show app
-                            document.getElementById('authScreen').style.display = 'none';
-                            document.getElementById('app').style.display = 'flex';
-                            // Load app
-                            if (typeof checkHealth === 'function') checkHealth();
-                            if (typeof loadDashboard === 'function') loadDashboard();
-                            if (typeof setupUploadZone === 'function') setupUploadZone();
-                        } else {
-                            // Show login
-                            document.getElementById('authScreen').style.display = 'flex';
-                            document.getElementById('app').style.display = 'none';
-                            // Mount Clerk sign-in component
-                            window.Clerk.mountSignIn(document.getElementById('clerkMount'), {
-                                signUpUrl: '/?sign_up=true',
-                                afterSignInUrl: window.location.origin,
-                            });
-                        }
-                        
-                        // Listen for auth changes
-                        window.Clerk.addListener((payload) => {
-                            if (payload.user) {
-                                document.getElementById('authScreen').style.display = 'none';
-                                document.getElementById('app').style.display = 'flex';
-                                if (typeof loadDashboard === 'function') loadDashboard();
-                            } else {
-                                document.getElementById('authScreen').style.display = 'flex';
-                                document.getElementById('app').style.display = 'none';
-                            }
-                        });
-                    };
-                    document.head.appendChild(script);
-                    
-                    // Initialize Clerk with publishable key
-                    window.Clerk = new window.clerk.Clerk(config.publishable_key);
-                } else {
-                    // No auth — show app directly
-                    document.getElementById('app').style.display = 'flex';
-                    if (typeof checkHealth === 'function') checkHealth();
-                    if (typeof loadDashboard === 'function') loadDashboard();
-                    if (typeof setupUploadZone === 'function') setupUploadZone();
-                }
-            } catch (e) {
-                console.error('Auth init error:', e);
-                // Fallback: show app without auth
+            const showApp = () => {
+                document.getElementById('authScreen').style.display = 'none';
                 document.getElementById('app').style.display = 'flex';
                 if (typeof checkHealth === 'function') checkHealth();
                 if (typeof loadDashboard === 'function') loadDashboard();
                 if (typeof setupUploadZone === 'function') setupUploadZone();
+            };
+
+            try {
+                const res = await fetch('/api/auth/config');
+                const config = await res.json();
+
+                if (config.enabled && config.publishable_key) {
+                    // Load Clerk JS dynamically
+                    const script = document.createElement('script');
+                    script.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
+                    script.async = true;
+
+                    script.onload = async function () {
+                        try {
+                            const clerk = new window.Clerk(config.publishable_key);
+                            window.__clerk = clerk;
+                            await clerk.load();
+
+                            const render = () => {
+                                if (clerk.isSignedIn) {
+                                    // User is signed in — show app and initialize it
+                                    showApp();
+                                } else {
+                                    // Show login
+                                    document.getElementById('authScreen').style.display = 'flex';
+                                    document.getElementById('app').style.display = 'none';
+                                    clerk.mountSignIn(document.getElementById('clerkMount'), {
+                                        signUpUrl: '/?sign_up=true',
+                                        afterSignInUrl: window.location.origin,
+                                    });
+                                }
+                            };
+
+                            clerk.addListener(render);
+                            render();
+                        } catch (err) {
+                            console.error('Clerk init error:', err);
+                            showApp();
+                        }
+                    };
+
+                    script.onerror = function () {
+                        console.error('Failed to load Clerk JS');
+                        showApp();
+                    };
+
+                    document.head.appendChild(script);
+                } else {
+                    // No auth — show app directly
+                    showApp();
+                }
+            } catch (e) {
+                console.error('Auth init error:', e);
+                // Fallback: show app without auth
+                showApp();
             }
         })();
     </script>
