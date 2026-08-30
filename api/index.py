@@ -574,11 +574,14 @@ class InvoiceParser:
         Labels like 'grand total' / 'total amount' are checked before the
         generic 'total' label, and the generic 'total' intentionally does not
         match 'Total Tax', 'Total GST', 'Total VAT' or 'Total Discount'.
+        The amount is read immediately after the matched label so flattened
+        OCR text (e.g. 'Invoice 123 Total 1000.00') still returns the right
+        number rather than the first number on the line.
         """
         for label in labels:
             if label.lower() == "total":
                 rx = re.compile(
-                    r"(?:^|(?<=[\s:;.-]))total\b(?!\s*(?:tax|gst|vat|discount))",
+                    r"(?:^|(?<=[\s:;.-]))total\b(?!\s*(?:tax|gst|vat|discount|before\s*tax))",
                     re.IGNORECASE,
                 )
             else:
@@ -588,29 +591,29 @@ class InvoiceParser:
                 )
             for raw in lines:
                 line = cls._fix_line(raw)
-                if not line or not rx.search(line):
+                if not line:
                     continue
+                m = rx.search(line)
+                if not m:
+                    continue
+                tail = line[m.end():]
+                amt = re.search(r"(?:[$₹€£]\s*)?(" + _AMOUNT_RE + r")", tail)
+                if amt:
+                    return cls.parse_amount(amt.group(0))
+                # Some OCR puts the label at the end of the line/column; fall
+                # back to the first amount on the line.
                 _, value = cls._amount_on_line(line)
                 if value is not None:
                     return value
             # fallback: scan the whole text for label followed by an amount
             for raw in lines:
                 line = cls._fix_line(raw)
-                if label.lower() == "total":
-                    m = re.search(
-                        r"(?:^|(?<=[\s:;.-]))total\b(?!\s*(?:tax|gst|vat|discount))"
-                        r"[^\d]*(" + _AMOUNT_RE + r")",
-                        line,
-                        re.IGNORECASE,
-                    )
-                else:
-                    m = re.search(
-                        r"(?:" + re.escape(label) + r")[^\d]*(" + _AMOUNT_RE + r")",
-                        line,
-                        re.IGNORECASE,
-                    )
+                m = rx.search(line)
                 if m:
-                    return cls.parse_amount(m.group(1))
+                    tail = line[m.end():]
+                    amt = re.search(r"(?:[$₹€£]\s*)?(" + _AMOUNT_RE + r")", tail)
+                    if amt:
+                        return cls.parse_amount(amt.group(0))
         return 0.0
 
     @classmethod
@@ -771,6 +774,34 @@ class InvoiceParser:
             return True
         return False
 
+    @staticmethod
+    def _clean_vendor_candidate(candidate: str) -> str:
+        """Trim address/contact detail from the end of a vendor candidate.
+
+        OCR often keeps an address on the same logical line, e.g.
+        'Rajesh Electronics Pvt Ltd 12 MG Road, Jaipur 302001'. Keep only the
+        name portion before the street/address starts.
+        """
+        c = (candidate or "").strip()
+        c = re.split(
+            r"\s+(?:\d{1,5}(?:[\s,.][A-Za-z]+)?|\+\d|\(?\d{3}\)?[-.\s]\d{3,})"
+            r"[^\s,]*[,\s]?|,?\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?|"
+            r"@|www\.|https?://",
+            c,
+            maxsplit=1,
+        )[0]
+        c = re.sub(
+            r"^(?:invoice|bill|receipt|tax\s*invoice|quotation|estimate|statement|payment|"
+            r"date|due|total|subtotal|amount|from|to|bill\s*from|bill\s*to)"
+            r"\b[\s:.#\-]*",
+            "", c, flags=re.IGNORECASE,
+        )
+        c = re.sub(r"^\s*[#.\-:\s]+", "", c).strip()
+        c = re.sub(r"\s+", " ", c)
+        if len(c) > 80:
+            c = c[:80].rsplit(" ", 1)[0]
+        return c
+
     @classmethod
     def extract_vendor(cls, text: str) -> str:
         lines = cls._lines(text)
@@ -784,7 +815,7 @@ class InvoiceParser:
                 re.IGNORECASE,
             )
             if m:
-                candidate = m.group(1).strip()
+                candidate = cls._clean_vendor_candidate(m.group(1).strip())
                 if len(candidate) >= 3 and re.search(r"[A-Za-z]", candidate) and not cls._looks_like_address(candidate):
                     return candidate[:80]
         strong = re.compile(
@@ -812,6 +843,19 @@ class InvoiceParser:
             if re.fullmatch(r"[^0-9@]*[A-Za-z][A-Za-z0-9 &'.,()\-]{2,60}", line):
                 if strong.search(line) or re.search(r"[A-Z]{2,}", line):
                     return line[:80]
+        # Flattened OCR: find an early "Company Name LLC/Inc/Ltd/..." even when
+        # the whole document is one line.
+        name_suffix_re = re.compile(
+            r"\b([A-Z][A-Za-z0-9&'.,()\-]*(?:\s+[A-Za-z0-9&'.,()\-]+){0,5}"
+            r"\s+(?:LLC|Ltd|Limited|Inc|Pvt|Private|Corp|Corporation|"
+            r"Solutions|Enterprises|Ventures|Services|Technologies|Associates|"
+            r"Industries|Traders|Works|Pharmacy|Hospital|Hotel|Mart|Shop|Store))\b"
+        )
+        m = name_suffix_re.search(text)
+        if m:
+            candidate = cls._clean_vendor_candidate(m.group(1))
+            if len(candidate) >= 3 and not cls._looks_like_address(candidate):
+                return candidate[:80]
         # If no seller is present, fall back to the "Bill To"/customer line so
         # scanned/generated invoices still have a recognizable party name.
         for raw in lines:
@@ -822,7 +866,7 @@ class InvoiceParser:
                 re.IGNORECASE,
             )
             if m:
-                candidate = m.group(1).strip()
+                candidate = cls._clean_vendor_candidate(m.group(1).strip())
                 if len(candidate) >= 3 and not cls._looks_like_address(candidate) and re.search(r"[A-Za-z]", candidate):
                     return candidate[:80]
         for raw in lines[:8]:
@@ -830,6 +874,7 @@ class InvoiceParser:
             if (line and re.search(r"[A-Za-z]{2,}", line) and len(line) <= 60
                     and not header_label.search(line) and not customer_label.search(line)
                     and not cls._looks_like_address(line)
+                    and not re.search(r"\b\d+\b", line)  # avoid line-item/phone/date lines
                     and re.fullmatch(r"[^0-9@]*[A-Za-z][A-Za-z0-9 &'.,()\-]{2,60}", line)):
                 return line[:80]
         return "Unknown Vendor"
@@ -845,11 +890,13 @@ class InvoiceParser:
     def _extract_tax_breakdown(text: str) -> tuple:
         """Return (tax_amount, tax_rate, cgst_amount, sgst_amount, igst_amount).
 
-        Scans GST/CGST/SGST/IGST/VAT lines. When component amounts (CGST/SGST/
-        IGST) are present they are authoritative and a combined 'Total Tax' line
-        is not added again, which prevents double counting.
+        Scans GST/CGST/SGST/IGST/VAT labels anywhere in the text (not only on
+        newline-separated lines), so flattened OCR output still works. When
+        component amounts (CGST/SGST/IGST) are present they are authoritative
+        and a combined 'Total Tax' label is not added again, preventing double
+        counting.
         """
-        lines = InvoiceParser._lines(text)
+        text = text or ""
         cgst = 0.0
         sgst = 0.0
         igst = 0.0
@@ -857,55 +904,49 @@ class InvoiceParser:
         combined_tax = 0.0
         combined_rates = []
 
-        for raw in lines:
-            line = InvoiceParser._fix_line(raw)
-            is_component = bool(re.search(r"\bcgst\b|\bsgst\b|\bigst\b", line, re.IGNORECASE))
-            rate = 0.0
-            amt = 0.0
-
-            # "(CGST 9%) 4500" style lines
-            m = re.search(
-                r"(?:(?:cgst|sgst|igst|gst|vat|tax)\s*\()[^:]{0,18}?"
-                r"(?P<rate>\d+(?:\.\d+)?)\s*%[^\d]*(?P<amt>" + _AMOUNT_RE + r")?",
-                line,
-                re.IGNORECASE,
-            )
-            if m:
-                rate = float(m.group("rate"))
-                amt = InvoiceParser.parse_amount(m.group("amt"))
-            else:
-                # "Tax (8.25%) 90.75" or "GST 18% 4500"
-                m = re.search(
-                    r"(?:cgst|sgst|igst|gst|vat|tax)\s*\(?(\d+(?:\.\d+)?)%\)?\s*[:#.-]?\s*(?:(?:[$₹€£])\s*)?(" + _AMOUNT_RE + r")?",
-                    line, re.IGNORECASE,
-                )
-                if m:
-                    rate = float(m.group(1))
-                    amt = InvoiceParser.parse_amount(m.group(2))
-                else:
-                    # "Tax Amount 90.75" / "Total Tax 9000"
-                    m = re.search(
-                        r"(?:cgst\s*amount|sgst\s*amount|igst\s*amount|tax\s*amount|total\s*tax|total\s*vat|vat)\s*[:\-\s]*(?:(?:[$₹€£])\s*)?(" + _AMOUNT_RE + r")",
-                        line, re.IGNORECASE,
-                    )
-                    if m:
-                        amt = InvoiceParser.parse_amount(m.group(1))
-                    else:
-                        continue
-
-            if is_component:
-                if re.search(r"\bcgst\b", line, re.IGNORECASE):
-                    cgst += amt
-                elif re.search(r"\bsgst\b", line, re.IGNORECASE):
-                    sgst += amt
-                elif re.search(r"\bigst\b", line, re.IGNORECASE):
-                    igst += amt
-                if rate > 0:
-                    component_rates.append(rate)
+        def _add(match_label: str, rate: float, amt: float):
+            nonlocal cgst, sgst, igst, combined_tax
+            if not amt:
+                return
+            # Only the split-table labels are treated as components here.
+            if re.search(r"\bcgst\b", match_label, re.IGNORECASE):
+                cgst += amt
+            elif re.search(r"\bsgst\b", match_label, re.IGNORECASE):
+                sgst += amt
+            elif re.search(r"\bigst\b", match_label, re.IGNORECASE):
+                igst += amt
             else:
                 combined_tax += amt
+
+        # "(CGST 9%) 4500" / "CGST 9% 4500" / "Tax (8.25%) 90.75"
+        rate_re = (
+            r"(?:(?:cgst|sgst|igst|gst|vat|tax)\s*\()[^:]{0,18}?"
+            r"(?P<rate>\d+(?:\.\d+)?)\s*%[^\d]*(?P<amt>" + _AMOUNT_RE + r")?"
+            r"|(?:cgst|sgst|igst|gst|vat|tax)\s*\(?(?P<rate2>\d+(?:\.\d+)?)%\)?\s*"
+            r"[:#.-]?\s*(?:(?:[$₹€£])\s*)?(?P<amt2>" + _AMOUNT_RE + r")?"
+        )
+        for m in re.finditer(rate_re, text, re.IGNORECASE):
+            rate = float(m.group("rate") or m.group("rate2") or 0)
+            amt = InvoiceParser.parse_amount(m.group("amt") or m.group("amt2"))
+            label = m.group(0)
+            if re.search(r"\bcgst\b|\bsgst\b|\bigst\b", label, re.IGNORECASE):
+                if rate > 0:
+                    component_rates.append(rate)
+                _add(label, rate, amt)
+            else:
                 if rate > 0:
                     combined_rates.append(rate)
+                _add(label, rate, amt)
+
+        # "Tax Amount 90.75" / "Total Tax 9000"
+        bare_re = (
+            r"(?:cgst\s*amount|sgst\s*amount|igst\s*amount|tax\s*amount|"
+            r"total\s*tax|total\s*vat|vat)\s*[:\-\s]*(?:(?:[$₹€£])\s*)?"
+            r"(" + _AMOUNT_RE + r")"
+        )
+        for m in re.finditer(bare_re, text, re.IGNORECASE):
+            amt = InvoiceParser.parse_amount(m.group(1))
+            _add(m.group(0), 0.0, amt)
 
         component_tax = round(cgst + sgst + igst, 2)
         if component_tax > 0:
@@ -946,16 +987,18 @@ class InvoiceParser:
         for line in lines:
             if not line or len(line) < 4:
                 continue
+            # Amount columns, allowing optional currency symbols.
+            amount_match = list(re.finditer(r"(?:[$₹€£]\s*)?" + _AMOUNT_RE, line))
             # A summary/totals line always ends the item table first.
             if cls._SUMMARY_RE.match(line):
                 break
-            if cls._ITEM_HEADER_RE.match(line):
+            # A pure header row ("Item Qty Rate") has no amounts; a line like
+            # "Service 500" starts with a header word but is an actual item.
+            if cls._ITEM_HEADER_RE.match(line) and not amount_match:
                 in_section = True
                 continue
             if cls._looks_like_non_item_line(line) or cls._looks_like_address(line) or cls._looks_like_date(line):
                 continue
-            # Amount columns, allowing optional currency symbols.
-            amount_match = list(re.finditer(r"(?:[$₹€£]\s*)?" + _AMOUNT_RE, line))
             if not amount_match:
                 continue
             # Without a header row we only trust lines with at least two numbers
@@ -1008,8 +1051,8 @@ class InvoiceParser:
         )
         result['subtotal'] = cls._find_amount(
             lines,
-            ["sub total", "subtotal", "taxable value", "taxable amount",
-             "net amount", "amount before tax"],
+            ["sub total", "subtotal", "taxable value", "taxable amount", "net amount",
+             "amount before tax", "total before tax", "total excluding tax", "total excl tax"],
         )
         tax_amount, tax_rate, cgst_amount, sgst_amount, igst_amount = cls._extract_tax_breakdown(raw_text)
         result['tax_amount'] = tax_amount
@@ -1322,7 +1365,7 @@ async def scan_invoice(file: UploadFile = File(...), request: Request = None):
                 sgst_amount, igst_amount, total_amount, currency, total_inr, category,
                 categorization_source, category_confidence, payment_status, raw_text,
                 line_items, confidence_score
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)
         """
         insert_sql_lite = """
             INSERT INTO invoices (
