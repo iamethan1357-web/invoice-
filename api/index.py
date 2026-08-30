@@ -1427,8 +1427,15 @@ async def scan_invoice(file: UploadFile = File(...), request: Request = None):
         if raw_text and len(raw_text) > 20:
             parsed = InvoiceParser.parse(raw_text)
             is_demo = False
+        elif OCR_SPACE_API_KEY:
+            # OCR is configured but returned nothing: do NOT fake demo data.
+            raise HTTPException(
+                422,
+                "OCR returned no usable text for this file. Check that the image is clear, "
+                "upright and not too large (free OCR.Space plan is ~1MB).",
+            )
         else:
-            # Demo mode — generate realistic data
+            # Demo mode (no API key configured) — generate realistic data.
             parsed = _generate_demo_result(filename)
             is_demo = True
 
