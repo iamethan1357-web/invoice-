@@ -53,6 +53,11 @@
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
                 Analytics
             </a>
+            <div class="nav-section-label">Compliance</div>
+            <a href="#" class="nav-item" data-page="gst" onclick="showPage('gst')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5c-5 0-9 3-9 7s4 7 9 7 9-3 9-7-4-7-9-7z"/><path d="M12 5v14"/><path d="M6 12h12"/></svg>
+                GST Reports
+            </a>
         </nav>
         <div class="sidebar-footer">
             <div class="status-indicator" id="statusIndicator">
@@ -69,6 +74,14 @@
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
             </button>
             <div class="top-bar-right">
+                <button class="export-btn" onclick="exportTally()" title="Download Tally XML">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Tally XML
+                </button>
+                <button class="export-btn" onclick="exportQuickBooks()" title="Download QuickBooks IIF">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    QuickBooks
+                </button>
                 <button class="btn-icon" onclick="exportCSV()" title="Export CSV">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 </button>
@@ -240,6 +253,84 @@
                 <div class="card full-width">
                     <div class="card-header"><h3>Overview</h3></div>
                     <div class="card-body"><div class="quick-stats" id="quickStats"><div class="loading">Loading...</div></div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ GST Reports Page ═══ -->
+        <div class="page" id="page-gst">
+            <div class="page-header">
+                <h1>GST Reports</h1>
+                <p class="page-subtitle">GST summary for Indian businesses — taxable value, CGST, SGST &amp; IGST</p>
+            </div>
+            <div class="filters-bar">
+                <select class="filter-select" id="gstYear" onchange="loadGSTReport()">
+                    <option value="">All Years</option>
+                    <option value="2024">2024</option>
+                    <option value="2025">2025</option>
+                    <option value="2026">2026</option>
+                    <option value="2027">2027</option>
+                </select>
+                <select class="filter-select" id="gstMonth" onchange="loadGSTReport()">
+                    <option value="">All Months</option>
+                    <option value="01">January</option><option value="02">February</option>
+                    <option value="03">March</option><option value="04">April</option>
+                    <option value="05">May</option><option value="06">June</option>
+                    <option value="07">July</option><option value="08">August</option>
+                    <option value="09">September</option><option value="10">October</option>
+                    <option value="11">November</option><option value="12">December</option>
+                </select>
+                <select class="filter-select" id="gstStatus" onchange="loadGSTReport()">
+                    <option value="">All Status</option>
+                    <option value="Paid">Paid</option>
+                    <option value="Pending">Pending</option>
+                </select>
+                <button class="btn btn-secondary" onclick="loadGSTReport()">Refresh</button>
+            </div>
+            <div class="stats-grid" id="gstStats">
+                <div class="stat-card"><div class="stat-card-inner"><div class="stat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><div class="stat-body"><span class="stat-value" id="gstInvoices">—</span><span class="stat-label">Invoices</span></div></div></div>
+                <div class="stat-card"><div class="stat-card-inner"><div class="stat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="stat-body"><span class="stat-value" id="gstTaxable">—</span><span class="stat-label">Taxable Value</span></div></div></div>
+                <div class="stat-card"><div class="stat-card-inner"><div class="stat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div><div class="stat-body"><span class="stat-value" id="gstTotalTax">—</span><span class="stat-label">Total Tax</span></div></div></div>
+                <div class="stat-card"><div class="stat-card-inner"><div class="stat-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div><div class="stat-body"><span class="stat-value" id="gstInvoiceAmt">—</span><span class="stat-label">Invoice Amount</span></div></div></div>
+            </div>
+            <div class="report-grid">
+                <div class="card">
+                    <div class="card-header"><h3>Rate-wise GST Summary</h3></div>
+                    <div class="card-body"><div class="table-container" style="border:none;border-radius:0;">
+                        <table class="invoice-table">
+                            <thead><tr><th>Rate</th><th>Invoices</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total Tax</th></tr></thead>
+                            <tbody id="gstRateTable"><tr><td colspan="7" class="loading">Loading...</td></tr></tbody>
+                        </table>
+                    </div></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3>Category-wise GST</h3></div>
+                    <div class="card-body"><div class="table-container" style="border:none;border-radius:0;">
+                        <table class="invoice-table">
+                            <thead><tr><th>Category</th><th>Invoices</th><th>Taxable</th><th>Total Tax</th></tr></thead>
+                            <tbody id="gstCategoryTable"><tr><td colspan="4" class="loading">Loading...</td></tr></tbody>
+                        </table>
+                    </div></div>
+                </div>
+                <div class="card full-width">
+                    <div class="card-header"><h3>Monthly GST Summary</h3></div>
+                    <div class="card-body"><div class="table-container" style="border:none;border-radius:0;">
+                        <table class="invoice-table">
+                            <thead><tr><th>Month</th><th>Invoices</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total Tax</th></tr></thead>
+                            <tbody id="gstMonthTable"><tr><td colspan="7" class="loading">Loading...</td></tr></tbody>
+                        </table>
+                    </div></div>
+                </div>
+                <div class="card full-width">
+                    <div class="card-header"><h3>Accounting Exports</h3></div>
+                    <div class="card-body" style="padding:20px 20px;">
+                        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">Import directly into Tally or QuickBooks (Desktop) to post purchases and GST.</p>
+                        <div class="result-actions">
+                            <button class="btn btn-primary" onclick="exportTally()">Export Tally XML</button>
+                            <button class="btn btn-secondary" onclick="exportQuickBooks()">Export QuickBooks IIF</button>
+                            <button class="btn btn-secondary" onclick="exportCSV()">Export CSV</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

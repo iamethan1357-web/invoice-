@@ -96,6 +96,7 @@ function showPage(page) {
         case 'dashboard': loadDashboard(); break;
         case 'invoices': loadInvoices(); break;
         case 'analytics': loadAnalytics(); break;
+        case 'gst': loadGSTReport(); break;
         case 'scan': resetScan(); break;
     }
     document.getElementById('sidebar').classList.remove('open');
@@ -366,6 +367,10 @@ async function viewInvoice(id) {
             <div class="modal-detail-row"><span class="label">Due Date</span><span class="value">${fmtDate(d.due_date)}</span></div>
             <div class="modal-detail-row"><span class="label">Subtotal</span><span class="value">${fmtCur(d.subtotal, d.currency)}</span></div>
             <div class="modal-detail-row"><span class="label">Tax (${d.tax_rate}%)</span><span class="value">${fmtCur(d.tax_amount, d.currency)}</span></div>
+            ${(d.cgst_amount || d.sgst_amount || d.igst_amount) ? `
+            <div class="modal-detail-row"><span class="label">CGST</span><span class="value">${fmtCur(d.cgst_amount, d.currency)}</span></div>
+            <div class="modal-detail-row"><span class="label">SGST</span><span class="value">${fmtCur(d.sgst_amount, d.currency)}</span></div>
+            <div class="modal-detail-row"><span class="label">IGST</span><span class="value">${fmtCur(d.igst_amount, d.currency)}</span></div>` : ''}
             <div class="modal-detail-row"><span class="label">Total</span><span class="value" style="color:var(--brand-400);font-size:16px">${fmtCur(d.total_amount, d.currency)}</span></div>
             <div class="modal-detail-row"><span class="label">Total (INR)</span><span class="value">${fmtCur(d.total_inr, 'INR')}</span></div>
             <div class="modal-detail-row"><span class="label">Currency</span><span class="value">${d.currency}</span></div>
@@ -454,10 +459,80 @@ async function loadAnalytics() {
     } catch (err) { console.error(err); }
 }
 
+// ─── GST Reports ────────────────────────────────────────────────────────────
+async function loadGSTReport() {
+    const year = document.getElementById('gstYear').value;
+    const month = document.getElementById('gstMonth').value;
+    const status = document.getElementById('gstStatus').value;
+    const params = new URLSearchParams({ year, month, status });
+    try {
+        const res = await authFetch(`/api/gst/report?${params}`);
+        const data = await res.json();
+
+        // Summary cards
+        const s = data.summary || {};
+        document.getElementById('gstInvoices').textContent = s.invoices || 0;
+        document.getElementById('gstTaxable').textContent = fmtCur(s.taxable_value, 'INR');
+        document.getElementById('gstTotalTax').textContent = fmtCur(s.total_tax, 'INR');
+        document.getElementById('gstInvoiceAmt').textContent = fmtCur(s.total_invoice_amount, 'INR');
+
+        // Rate-wise table
+        const rateRows = (data.by_rate || []).map(r => `
+            <tr>
+                <td><strong>${r.rate}%</strong></td>
+                <td>${r.invoices}</td>
+                <td class="amount-cell">${fmtCur(r.taxable_value, 'INR')}</td>
+                <td class="amount-cell">${fmtCur(r.cgst, 'INR')}</td>
+                <td class="amount-cell">${fmtCur(r.sgst, 'INR')}</td>
+                <td class="amount-cell">${fmtCur(r.igst, 'INR')}</td>
+                <td class="amount-cell">${fmtCur(r.total_tax, 'INR')}</td>
+            </tr>`).join('') || '<tr><td colspan="7" class="empty-state">No GST data yet</td></tr>';
+        document.getElementById('gstRateTable').innerHTML = rateRows;
+
+        // Category-wise table
+        const catRows = (data.by_category || []).map(c => `
+            <tr>
+                <td>${esc(c.category)}</td>
+                <td>${c.invoices}</td>
+                <td class="amount-cell">${fmtCur(c.taxable_value, 'INR')}</td>
+                <td class="amount-cell">${fmtCur(c.total_tax, 'INR')}</td>
+            </tr>`).join('') || '<tr><td colspan="4" class="empty-state">No GST data yet</td></tr>';
+        document.getElementById('gstCategoryTable').innerHTML = catRows;
+
+        // Monthly table
+        const monthRows = (data.by_month || []).map(m => `
+            <tr>
+                <td><strong>${esc(m.month)}</strong></td>
+                <td>${m.invoices}</td>
+                <td class="amount-cell">${fmtCur(m.taxable_value, 'INR')}</td>
+                <td class="amount-cell">${fmtCur(m.cgst, 'INR')}</td>
+                <td class="amount-cell">${fmtCur(m.sgst, 'INR')}</td>
+                <td class="amount-cell">${fmtCur(m.igst, 'INR')}</td>
+                <td class="amount-cell">${fmtCur(m.total_tax, 'INR')}</td>
+            </tr>`).join('') || '<tr><td colspan="7" class="empty-state">No GST data yet</td></tr>';
+        document.getElementById('gstMonthTable').innerHTML = monthRows;
+    } catch (err) {
+        console.error(err);
+        ['gstRateTable', 'gstCategoryTable', 'gstMonthTable'].forEach(id => {
+            document.getElementById(id).innerHTML = '<tr><td colspan="7" class="empty-state">Error loading GST report</td></tr>';
+        });
+    }
+}
+
 // ─── Export ─────────────────────────────────────────────────────────────────
 function exportCSV() {
     window.open('/api/export/csv', '_blank');
     showToast('Download started', 'success');
+}
+
+function exportTally() {
+    window.open('/api/export/tally', '_blank');
+    showToast('Tally export downloading...', 'success');
+}
+
+function exportQuickBooks() {
+    window.open('/api/export/quickbooks', '_blank');
+    showToast('QuickBooks export downloading...', 'success');
 }
 
 // ─── Utilities ──────────────────────────────────────────────────────────────

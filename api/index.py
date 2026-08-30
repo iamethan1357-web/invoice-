@@ -19,6 +19,7 @@ import hashlib
 from datetime import datetime
 from typing import Optional, List
 from contextlib import contextmanager
+from xml.sax.saxutils import escape
 
 import psycopg2
 import psycopg2.extras
@@ -225,6 +226,9 @@ def init_database():
                     subtotal REAL DEFAULT 0,
                     tax_amount REAL DEFAULT 0,
                     tax_rate REAL DEFAULT 0,
+                    cgst_amount REAL DEFAULT 0,
+                    sgst_amount REAL DEFAULT 0,
+                    igst_amount REAL DEFAULT 0,
                     total_amount REAL DEFAULT 0,
                     currency VARCHAR(5) DEFAULT 'INR',
                     total_inr REAL DEFAULT 0,
@@ -238,12 +242,13 @@ def init_database():
                     updated_at TEXT DEFAULT (datetime('now'))
                 )
             """)
-            # Add user_id column if it doesn't exist (migration)
-            try:
-                conn.execute("ALTER TABLE invoices ADD COLUMN user_id TEXT")
-                conn.commit()
-            except:
-                pass  # Column already exists
+            # Add columns that may be missing on existing databases (migration)
+            for col in ["user_id", "cgst_amount", "sgst_amount", "igst_amount"]:
+                try:
+                    conn.execute(f"ALTER TABLE invoices ADD COLUMN {col} {'TEXT' if col == 'user_id' else 'REAL DEFAULT 0'}")
+                except:
+                    pass  # Column already exists
+            conn.commit()
         else:
             # PostgreSQL schema
             cur = conn.cursor()
@@ -260,6 +265,9 @@ def init_database():
                     subtotal DECIMAL(14,2) DEFAULT 0,
                     tax_amount DECIMAL(14,2) DEFAULT 0,
                     tax_rate DECIMAL(6,2) DEFAULT 0,
+                    cgst_amount DECIMAL(14,2) DEFAULT 0,
+                    sgst_amount DECIMAL(14,2) DEFAULT 0,
+                    igst_amount DECIMAL(14,2) DEFAULT 0,
                     total_amount DECIMAL(14,2) DEFAULT 0,
                     currency VARCHAR(5) DEFAULT 'INR',
                     total_inr DECIMAL(14,2) DEFAULT 0,
@@ -273,11 +281,12 @@ def init_database():
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
                 )
             """)
-            # Add user_id column if migration needed
-            try:
-                cur.execute("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS user_id TEXT")
-            except:
-                pass
+            # Add columns that may be missing on existing databases (migration)
+            for col in ["user_id", "cgst_amount", "sgst_amount", "igst_amount"]:
+                try:
+                    cur.execute(f"ALTER TABLE invoices ADD COLUMN IF NOT EXISTS {col} TEXT" if col == "user_id" else f"ALTER TABLE invoices ADD COLUMN IF NOT EXISTS {col} DECIMAL(14,2) DEFAULT 0")
+                except:
+                    pass
             cur.execute("CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(created_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_invoices_vendor ON invoices(vendor_name)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_invoices_category ON invoices(category)")
@@ -637,15 +646,23 @@ class InvoiceParser:
 
     @staticmethod
     def _extract_tax_breakdown(text: str) -> tuple:
-        """Return (tax_amount, tax_rate) by scanning GST/CGST/SGST/VAT lines."""
+        """Return (tax_amount, tax_rate, cgst_amount, sgst_amount, igst_amount).
+
+        Scans GST/CGST/SGST/IGST/VAT lines and splits the tax into its
+        components where the labels are available (Indian GST invoices).
+        """
         lines = InvoiceParser._lines(text)
-        total_tax = 0.0
+        cgst = 0.0
+        sgst = 0.0
+        igst = 0.0
+        other_tax = 0.0
         rates = []
         rate_only = []
+
         for raw in lines:
             line = InvoiceParser._fix_line(raw)
             m = re.search(
-                r"(?:(?:cgst|sgst|igst|gst|vat)|(?:tax)\s*\()[^:]{0,18}?"
+                r"(?:(?:cgst|sgst|igst|gst|vat|tax)\s*\()[^:]{0,18}?"
                 r"(?P<rate>\d+(?:\.\d+)?)\s*%[^\d]*(?P<amt>" + _AMOUNT_RE + r")?",
                 line,
                 re.IGNORECASE,
@@ -653,36 +670,70 @@ class InvoiceParser:
             if m:
                 rate = float(m.group("rate"))
                 amt = InvoiceParser.parse_amount(m.group("amt"))
-                if amt and amt > 0:
-                    total_tax += amt
-                    if rate > 0:
-                        rates.append(rate)
-                elif rate > 0:
+                if re.search(r"\bcgst\b", line, re.IGNORECASE):
+                    cgst += amt
+                elif re.search(r"\bsgst\b", line, re.IGNORECASE):
+                    sgst += amt
+                elif re.search(r"\bigst\b", line, re.IGNORECASE):
+                    igst += amt
+                elif amt:
+                    other_tax += amt
+                if rate > 0:
                     rates.append(rate)
-                    rate_only.append(rate)
+                    if not amt:
+                        rate_only.append(rate)
                 continue
-            m = re.search(r"(?:tax|gst|vat)\s*\(?(\d+(?:\.\d+)?)%\)?\s*[:#.-]?\s*(" + _AMOUNT_RE + r")?", line, re.IGNORECASE)
+            # Lines like "Tax (8.25%) 90.75" or "GST 18% 4500"
+            m = re.search(
+                r"(?:cgst|sgst|igst|gst|vat|tax)\s*\(?(\d+(?:\.\d+)?)%\)?\s*[:#.-]?\s*(" + _AMOUNT_RE + r")?",
+                line, re.IGNORECASE,
+            )
             if m:
                 rate = float(m.group(1))
                 amt = InvoiceParser.parse_amount(m.group(2))
-                if amt:
-                    total_tax += amt
-                    if rate:
-                        rates.append(rate)
-                else:
-                    rate_only.append(rate)
+                if re.search(r"\bcgst\b", line, re.IGNORECASE):
+                    cgst += amt
+                elif re.search(r"\bsgst\b", line, re.IGNORECASE):
+                    sgst += amt
+                elif re.search(r"\bigst\b", line, re.IGNORECASE):
+                    igst += amt
+                elif amt:
+                    other_tax += amt
+                if rate:
+                    rates.append(rate)
+                    if not amt:
+                        rate_only.append(rate)
                 continue
-            m = re.search(r"(?:tax\s*amount|total\s*tax|total\s*vat|vat)\s*[:\-]?\s*(" + _AMOUNT_RE + r")", line, re.IGNORECASE)
+            # A bare tax amount line, e.g. "Tax Amount 90.75"
+            m = re.search(
+                r"(?:cgst\s*amount|sgst\s*amount|igst\s*amount|tax\s*amount|total\s*tax|total\s*vat|vat)\s*[:\-]?\s*(" + _AMOUNT_RE + r")",
+                line, re.IGNORECASE,
+            )
             if m:
-                total_tax += InvoiceParser.parse_amount(m.group(1))
+                amt = InvoiceParser.parse_amount(m.group(1))
+                if re.search(r"\bcgst\b", line, re.IGNORECASE):
+                    cgst += amt
+                elif re.search(r"\bsgst\b", line, re.IGNORECASE):
+                    sgst += amt
+                elif re.search(r"\bigst\b", line, re.IGNORECASE):
+                    igst += amt
+                else:
+                    other_tax += amt
 
+        total_tax = round(cgst + sgst + igst + other_tax, 2)
         if rates:
             rate = sum(rates)
         elif rate_only:
             rate = sum(rate_only)
         else:
             rate = 0.0
-        return round(total_tax, 2), rate
+        # If the invoice only shows a combined GST amount, fall back to 50/50
+        # CGST/SGST split (the standard domestic split).
+        if cgst == 0 and sgst == 0 and igst == 0 and other_tax > 0:
+            cgst = round(other_tax / 2, 2)
+            sgst = round(other_tax / 2, 2)
+            other_tax = 0.0
+        return total_tax, rate, round(cgst, 2), round(sgst, 2), round(igst, 2)
 
     @classmethod
     def parse_line_items(cls, text: str) -> list:
@@ -749,9 +800,12 @@ class InvoiceParser:
             ["sub total", "subtotal", "taxable value", "taxable amount",
              "net amount", "amount before tax"],
         )
-        tax_amount, tax_rate = cls._extract_tax_breakdown(raw_text)
+        tax_amount, tax_rate, cgst_amount, sgst_amount, igst_amount = cls._extract_tax_breakdown(raw_text)
         result['tax_amount'] = tax_amount
         result['tax_rate'] = tax_rate
+        result['cgst_amount'] = cgst_amount
+        result['sgst_amount'] = sgst_amount
+        result['igst_amount'] = igst_amount
         result['category'] = "Uncategorized"
 
         if result['subtotal'] <= 0 and result['total_amount'] > 0 and result['tax_amount'] > 0:
@@ -962,18 +1016,18 @@ async def scan_invoice(file: UploadFile = File(...), request: Request = None):
         insert_sql_pg = """
             INSERT INTO invoices (
                 id, user_id, filename, original_name, vendor_name, invoice_number,
-                invoice_date, due_date, subtotal, tax_amount, tax_rate, total_amount,
-                currency, total_inr, category, payment_status, raw_text,
-                line_items, confidence_score
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                invoice_date, due_date, subtotal, tax_amount, tax_rate, cgst_amount,
+                sgst_amount, igst_amount, total_amount, currency, total_inr, category,
+                payment_status, raw_text, line_items, confidence_score
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """
         insert_sql_lite = """
             INSERT INTO invoices (
                 id, user_id, filename, original_name, vendor_name, invoice_number,
-                invoice_date, due_date, subtotal, tax_amount, tax_rate, total_amount,
-                currency, total_inr, category, payment_status, raw_text,
-                line_items, confidence_score
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                invoice_date, due_date, subtotal, tax_amount, tax_rate, cgst_amount,
+                sgst_amount, igst_amount, total_amount, currency, total_inr, category,
+                payment_status, raw_text, line_items, confidence_score
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """
         
         values = (
@@ -988,6 +1042,9 @@ async def scan_invoice(file: UploadFile = File(...), request: Request = None):
             parsed.get('subtotal', 0),
             parsed.get('tax_amount', 0),
             parsed.get('tax_rate', 0),
+            parsed.get('cgst_amount', 0),
+            parsed.get('sgst_amount', 0),
+            parsed.get('igst_amount', 0),
             parsed.get('total_amount', 0),
             parsed.get('currency', 'INR'),
             parsed.get('total_inr', 0),
@@ -1019,6 +1076,9 @@ async def scan_invoice(file: UploadFile = File(...), request: Request = None):
                 "subtotal": parsed.get('subtotal', 0),
                 "tax_amount": parsed.get('tax_amount', 0),
                 "tax_rate": parsed.get('tax_rate', 0),
+                "cgst_amount": parsed.get('cgst_amount', 0),
+                "sgst_amount": parsed.get('sgst_amount', 0),
+                "igst_amount": parsed.get('igst_amount', 0),
                 "total_amount": parsed.get('total_amount', 0),
                 "currency": parsed.get('currency', 'INR'),
                 "total_inr": parsed.get('total_inr', 0),
@@ -1058,6 +1118,9 @@ def _generate_demo_result(filename: str) -> dict:
         "subtotal": amount,
         "tax_amount": tax_amount,
         "tax_rate": tax_rate,
+        "cgst_amount": round(tax_amount / 2, 2),
+        "sgst_amount": round(tax_amount / 2, 2),
+        "igst_amount": 0,
         "total_amount": round(amount + tax_amount, 2),
         "currency": random.choice(["INR", "INR", "INR", "USD"]),
         "total_inr": 0,  # will be calculated
@@ -1153,7 +1216,7 @@ async def list_invoices(
     
     # Convert types
     for inv in invoices:
-        for k in ['subtotal', 'tax_amount', 'tax_rate', 'total_amount', 'total_inr', 'confidence_score']:
+        for k in ['subtotal', 'tax_amount', 'tax_rate', 'cgst_amount', 'sgst_amount', 'igst_amount', 'total_amount', 'total_inr', 'confidence_score']:
             if inv.get(k) is not None:
                 inv[k] = float(inv[k])
         if isinstance(inv.get('line_items'), str):
@@ -1203,7 +1266,7 @@ async def get_invoice(invoice_id: str, request: Request):
         raise HTTPException(404, "Invoice not found")
     
     inv = dict(row)
-    for k in ['subtotal', 'tax_amount', 'tax_rate', 'total_amount', 'total_inr', 'confidence_score']:
+    for k in ['subtotal', 'tax_amount', 'tax_rate', 'cgst_amount', 'sgst_amount', 'igst_amount', 'total_amount', 'total_inr', 'confidence_score']:
         if inv.get(k) is not None:
             inv[k] = float(inv[k])
     if isinstance(inv.get('line_items'), str):
@@ -1350,7 +1413,7 @@ async def dashboard_stats(request: Request):
         recent = []
         for r in recent_rows:
             inv = dict(r)
-            for k in ['subtotal', 'tax_amount', 'tax_rate', 'total_amount', 'total_inr', 'confidence_score']:
+            for k in ['subtotal', 'tax_amount', 'tax_rate', 'cgst_amount', 'sgst_amount', 'igst_amount', 'total_amount', 'total_inr', 'confidence_score']:
                 if inv.get(k) is not None:
                     inv[k] = float(inv[k])
             if isinstance(inv.get('line_items'), str):
@@ -1391,7 +1454,7 @@ async def dashboard_stats(request: Request):
         recent = []
         for r in cur.fetchall():
             inv = dict(r)
-            for k in ['subtotal', 'tax_amount', 'tax_rate', 'total_amount', 'total_inr', 'confidence_score']:
+            for k in ['subtotal', 'tax_amount', 'tax_rate', 'cgst_amount', 'sgst_amount', 'igst_amount', 'total_amount', 'total_inr', 'confidence_score']:
                 if inv.get(k) is not None:
                     inv[k] = float(inv[k])
             if isinstance(inv.get('line_items'), str):
@@ -1451,6 +1514,243 @@ async def export_csv():
         iter([output.getvalue()]),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=invoice_scanner_export.csv"}
+    )
+
+
+# ─── GST & Accounting Exports ────────────────────────────────────────────────
+
+def _fetch_all_invoices():
+    """Return all stored invoices as dicts (works for SQLite and PostgreSQL)."""
+    conn = get_db_connection()
+    if USE_SQLITE_FALLBACK:
+        rows = [dict(r) for r in conn.execute("SELECT * FROM invoices ORDER BY invoice_date DESC, created_at DESC").fetchall()]
+    else:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM invoices ORDER BY invoice_date DESC, created_at DESC")
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+    conn.close()
+    for inv in rows:
+        for k in ['subtotal', 'tax_amount', 'tax_rate', 'cgst_amount', 'sgst_amount',
+                  'igst_amount', 'total_amount', 'total_inr', 'confidence_score']:
+            if inv.get(k) is not None:
+                inv[k] = float(inv[k])
+        if isinstance(inv.get('line_items'), str):
+            try:
+                inv['line_items'] = json.loads(inv['line_items'])
+            except:
+                inv['line_items'] = []
+    return rows
+
+
+def _gst_components(inv: dict):
+    """Return (taxable, cgst, sgst, igst, total_tax) for an invoice.
+
+    For invoices that do not store a CGST/SGST/IGST split, the code estimates a
+    50/50 domestic split from the total tax amount.
+    """
+    tax = float(inv.get('tax_amount') or 0)
+    cgst = float(inv.get('cgst_amount') or 0)
+    sgst = float(inv.get('sgst_amount') or 0)
+    igst = float(inv.get('igst_amount') or 0)
+    if cgst == 0 and sgst == 0 and igst == 0:
+        cgst = round(tax / 2, 2)
+        sgst = round(tax / 2, 2)
+    taxable = float(inv.get('subtotal') or 0)
+    if taxable <= 0:
+        taxable = max(0.0, float(inv.get('total_amount') or 0) - tax)
+    return taxable, cgst, sgst, igst, round(cgst + sgst + igst, 2)
+
+
+@app.get("/api/gst/report")
+async def gst_report(
+    request: Request,
+    year: str = Query(""),
+    month: str = Query(""),
+    status: str = Query(""),
+    category: str = Query(""),
+):
+    """GST summary for Indian businesses: rate-wise, category-wise, monthly."""
+    invoices = _fetch_all_invoices()
+    summary = {
+        "invoices": 0, "taxable_value": 0.0, "cgst": 0.0, "sgst": 0.0,
+        "igst": 0.0, "total_tax": 0.0, "total_invoice_amount": 0.0,
+    }
+    by_rate = {}
+    by_category = {}
+    by_month = {}
+
+    for inv in invoices:
+        # GST reports are for INR invoices only.
+        if (inv.get('currency') or 'INR') != 'INR':
+            continue
+        inv_date = inv.get('invoice_date') or ''
+        y = inv_date[:4]
+        m = inv_date[5:7]
+        if year and y != year:
+            continue
+        if month and m != month.zfill(2):
+            continue
+        if status and (inv.get('payment_status') or '') != status:
+            continue
+        if category and (inv.get('category') or '') != category:
+            continue
+
+        taxable, cgst, sgst, igst, total_tax = _gst_components(inv)
+        total_amount = float(inv.get('total_amount') or taxable + total_tax)
+        rate = float(inv.get('tax_rate') or 0)
+        cat = inv.get('category') or 'Uncategorized'
+        ym = y + ("-" + m if m else "")
+
+        summary["invoices"] += 1
+        summary["taxable_value"] += taxable
+        summary["cgst"] += cgst
+        summary["sgst"] += sgst
+        summary["igst"] += igst
+        summary["total_tax"] += total_tax
+        summary["total_invoice_amount"] += total_amount
+
+        key_rate = round(rate, 2)
+        item = by_rate.setdefault(key_rate, {
+            "rate": key_rate, "invoices": 0, "taxable_value": 0.0,
+            "cgst": 0.0, "sgst": 0.0, "igst": 0.0, "total_tax": 0.0,
+        })
+        item["invoices"] += 1
+        item["taxable_value"] += taxable
+        item["cgst"] += cgst
+        item["sgst"] += sgst
+        item["igst"] += igst
+        item["total_tax"] += total_tax
+
+        item_c = by_category.setdefault(cat, {
+            "category": cat, "invoices": 0, "taxable_value": 0.0,
+            "cgst": 0.0, "sgst": 0.0, "igst": 0.0, "total_tax": 0.0,
+        })
+        item_c["invoices"] += 1
+        item_c["taxable_value"] += taxable
+        item_c["cgst"] += cgst
+        item_c["sgst"] += sgst
+        item_c["igst"] += igst
+        item_c["total_tax"] += total_tax
+
+        item_m = by_month.setdefault(ym, {
+            "month": ym, "invoices": 0, "taxable_value": 0.0,
+            "cgst": 0.0, "sgst": 0.0, "igst": 0.0, "total_tax": 0.0,
+        })
+        item_m["invoices"] += 1
+        item_m["taxable_value"] += taxable
+        item_m["cgst"] += cgst
+        item_m["sgst"] += sgst
+        item_m["igst"] += igst
+        item_m["total_tax"] += total_tax
+
+    summary["taxable_value"] = round(summary["taxable_value"], 2)
+    summary["cgst"] = round(summary["cgst"], 2)
+    summary["sgst"] = round(summary["sgst"], 2)
+    summary["igst"] = round(summary["igst"], 2)
+    summary["total_tax"] = round(summary["total_tax"], 2)
+    summary["total_invoice_amount"] = round(summary["total_invoice_amount"], 2)
+
+    def _finish(items):
+        for it in items.values():
+            for k in ("taxable_value", "cgst", "sgst", "igst", "total_tax"):
+                it[k] = round(it[k], 2)
+        return sorted(items.values(), key=lambda x: x.get("rate", x.get("month", x.get("category", ""))))
+
+    return {
+        "summary": summary,
+        "by_rate": _finish(by_rate),
+        "by_category": sorted(by_category.values(), key=lambda x: x["total_tax"], reverse=True),
+        "by_month": sorted(by_month.values(), key=lambda x: x["month"]),
+    }
+
+
+@app.get("/api/export/tally")
+async def export_tally():
+    """Export invoices as a Tally-compatible XML voucher file (.xml)."""
+    invoices = _fetch_all_invoices()
+    today = datetime.now().strftime("%Y%m%d")
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<ENVELOPE>",
+        "<HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER>",
+        "<BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>Vouchers</REPORTNAME></REQUESTDESC><REQUESTDATA>",
+    ]
+    for inv in invoices:
+        date_str = (inv.get('invoice_date') or today)[:10].replace("-", "")
+        invoice_no = escape(str(inv.get('invoice_number') or ''))
+        vendor = escape(str(inv.get('vendor_name') or 'Unknown'))
+        guid = escape(str(inv.get('id') or ''))
+        subtotal = float(inv.get('subtotal') or 0)
+        tax = float(inv.get('tax_amount') or 0)
+        total = float(inv.get('total_amount') or subtotal + tax)
+        lines.append('<TALLYMESSAGE xmlns:UDF="">')
+        lines.append('<VOUCHER VCHTYPE="Purchase" ACTION="Create" OBJVIEW="Invoice">')
+        lines.append(f"<DATE>{date_str}</DATE>")
+        lines.append(f"<GUID>{guid}</GUID>")
+        lines.append("<VOUCHERTYPENAME>Purchase</VOUCHERTYPENAME>")
+        lines.append(f"<VOUCHERNUMBER>{invoice_no}</VOUCHERNUMBER>")
+        lines.append(f"<PARTYLEDGERNAME>{vendor}</PARTYLEDGERNAME>")
+        lines.append(f"<AMOUNT>{total:.2f}</AMOUNT>")
+        lines.append('<ALLLEDGERENTRIES.LIST>')
+        lines.append('<LEDGERNAME>Purchase Account</LEDGERNAME>')
+        lines.append('<ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>')
+        lines.append(f"<AMOUNT>{subtotal:.2f}</AMOUNT>")
+        lines.append('</ALLLEDGERENTRIES.LIST>')
+        if tax > 0:
+            lines.append('<ALLLEDGERENTRIES.LIST>')
+            lines.append('<LEDGERNAME>GST Payable</LEDGERNAME>')
+            lines.append('<ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>')
+            lines.append(f"<AMOUNT>{tax:.2f}</AMOUNT>")
+            lines.append('</ALLLEDGERENTRIES.LIST>')
+        lines.append('</VOUCHER>')
+        lines.append('</TALLYMESSAGE>')
+    lines.append("</REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>")
+
+    content = "\n".join(lines)
+    return StreamingResponse(
+        iter([content]),
+        media_type="application/xml",
+        headers={"Content-Disposition": "attachment; filename=invoice_tally_export.xml"},
+    )
+
+
+@app.get("/api/export/quickbooks")
+async def export_quickbooks():
+    """Export invoices as a QuickBooks IIF import file (.iif)."""
+    invoices = _fetch_all_invoices()
+    rows = ['!TRNS\tTRNSID\tTRNSTYPE\tDATE\tNAME\tAMOUNT\tDOCNUM\tMEMO\tCLEAR\tTOPRINT']
+    rows.append('!SPL\tSPLID\tTRNSTYPE\tDATE\tNAME\tAMOUNT\tMEMO')
+
+    def txt(s):
+        return str(s).replace("\t", " ").replace("\n", " ")
+
+    for idx, inv in enumerate(invoices, start=1):
+        trnsid = idx
+        date_val = (inv.get('invoice_date') or datetime.now().strftime('%Y-%m-%d'))[:10]
+        try:
+            qb_date = datetime.strptime(date_val, "%Y-%m-%d").strftime("%m/%d/%Y")
+        except ValueError:
+            qb_date = date_val
+        vendor = txt(inv.get('vendor_name') or 'Unknown Vendor')
+        inv_no = txt(inv.get('invoice_number') or f'INV-{idx}')
+        memo = txt(f"{inv.get('category') or ''} {inv_no}".strip())
+        subtotal = float(inv.get('subtotal') or 0)
+        tax = float(inv.get('tax_amount') or 0)
+        total = float(inv.get('total_amount') or subtotal + tax)
+
+        rows.append(f"!TRNS\t{trnsid}\tBILL\t{qb_date}\t{vendor}\t{total:.2f}\t{inv_no}\t{memo}\tN\tN")
+        if subtotal:
+            rows.append(f"!SPL\t{trnsid}\tBILL\t{qb_date}\tExpenses\t{subtotal:.2f}\tBill amount")
+        if tax > 0:
+            rows.append(f"!SPL\t{trnsid}\tBILL\t{qb_date}\tGST Payable\t{tax:.2f}\tGST")
+        rows.append(f"!ENDTRNS\t{trnsid}")
+
+    content = "\n".join(rows) + "\n"
+    return StreamingResponse(
+        iter([content]),
+        media_type="text/plain",
+        headers={"Content-Disposition": "attachment; filename=invoice_quickbooks_export.iif"},
     )
 
 
