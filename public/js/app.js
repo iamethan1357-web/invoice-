@@ -42,6 +42,8 @@ async function authFetch(url, options = {}) {
 document.addEventListener('DOMContentLoaded', () => {
     // Initial load is handled by the auth init script in HTML
     // This listener only runs if auth is disabled or already resolved
+    // Apply the saved theme immediately to avoid a dark/light flash.
+    (function(){ const saved = localStorage.getItem('isp_theme'); if (saved) setTheme(saved); else setTheme('dark'); })();
     // Hide scan badge after first view
     setTimeout(() => { const b = document.getElementById('scanBadge'); if(b) b.style.display='none'; }, 5000);
 });
@@ -99,6 +101,7 @@ function showPage(page) {
         case 'gst': loadGSTReport(); break;
         case 'generator': loadTemplates(); break;
         case 'scan': resetScan(); break;
+        case 'settings': loadSettings(); break;
     }
     document.getElementById('sidebar').classList.remove('open');
     window.scrollTo({top: 0, behavior: 'smooth'});
@@ -898,6 +901,118 @@ function exportTally() {
 function exportQuickBooks() {
     window.open('/api/export/quickbooks', '_blank');
     showToast('QuickBooks export downloading...', 'success');
+}
+
+// ─── Settings ───────────────────────────────────────────────────────────────
+const SETTINGS_FIELDS = [
+    'business_name', 'business_address', 'business_email', 'business_phone', 'business_gstin',
+    'default_currency', 'default_tax_rate', 'default_discount_rate', 'default_payment_status',
+    'payment_terms', 'invoice_footer', 'accent_color', 'theme'
+];
+
+function setTheme(theme) {
+    const light = theme === 'light';
+    document.body.classList.toggle('theme-light', light);
+    document.body.classList.toggle('theme-dark', !light);
+    try { localStorage.setItem('isp_theme', theme); } catch(e) {}
+}
+
+async function loadSettings() {
+    try {
+        const res = await authFetch('/api/settings');
+        const data = await res.json();
+        if (!res.ok || data.error || data.detail) {
+            showToast(data.error || data.detail || 'Could not load settings', 'error');
+            return;
+        }
+        const s = data.settings || {};
+        const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val == null ? '' : val; };
+        setVal('setBusinessName', s.business_name);
+        setVal('setBusinessAddress', s.business_address);
+        setVal('setBusinessEmail', s.business_email);
+        setVal('setBusinessPhone', s.business_phone);
+        setVal('setBusinessGstin', s.business_gstin);
+        setVal('setCurrency', s.default_currency || 'INR');
+        setVal('setTaxRate', s.default_tax_rate != null ? s.default_tax_rate : 18);
+        setVal('setDiscountRate', s.default_discount_rate != null ? s.default_discount_rate : 0);
+        setVal('setDefaultStatus', s.default_payment_status || 'Pending');
+        setVal('setTerms', s.payment_terms);
+        setVal('setFooter', s.invoice_footer);
+        setVal('setAccent', s.accent_color || '#4f46e5');
+        setVal('setTheme', s.theme || 'dark');
+
+        // Populate currency options.
+        const curSel = document.getElementById('setCurrency');
+        const currencies = (data.currencies || ['INR','USD','EUR','GBP','AUD','CAD','SGD','AED','SAR']).map(c => c.toUpperCase());
+        if (curSel && currencies.length && !curSel.innerHTML.includes('</option>')) {
+            curSel.innerHTML = currencies.map(c => `<option value="${escAttr(c)}"${c === (s.default_currency||'INR') ? ' selected' : ''}>${esc(c)}</option>`).join('');
+        }
+
+        // Health/integration status.
+        renderSettingsHealth(data.health || {});
+        setTheme(s.theme || 'dark');
+    } catch (err) {
+        showToast('Could not load settings', 'error');
+    }
+}
+
+function renderSettingsHealth(h) {
+    const el = document.getElementById('settingsHealth');
+    if (!el) return;
+    const rows = [
+        ['OCR Engine', h.ocr_configured ? 'Configured' : 'Not configured (demo mode)', h.ocr_configured],
+        ['AI Categorization', h.ai_configured ? 'Configured' : 'Using local rules', h.ai_configured],
+        ['Authentication', h.auth_enabled ? 'Protected (Clerk)' : 'Open access', h.auth_enabled],
+        ['Database', h.database || 'Unknown', true],
+    ];
+    el.innerHTML = rows.map(([label, value, ok]) => `
+        <div class="settings-status-row">
+            <span>${esc(label)}</span>
+            <span class="status-pill ${ok ? 'ok' : 'warn'}">${esc(value)}</span>
+        </div>`).join('');
+    if (!h.ocr_configured) {
+        el.innerHTML += '<p class="settings-hint">Add <code>OCR_SPACE_API_KEY</code> in Vercel to extract real invoice data from images.</p>';
+    }
+}
+
+async function saveSettings() {
+    const payload = {};
+    SETTINGS_FIELDS.forEach(k => {
+        const map = {
+            business_name: 'setBusinessName', business_address: 'setBusinessAddress',
+            business_email: 'setBusinessEmail', business_phone: 'setBusinessPhone',
+            business_gstin: 'setBusinessGstin', default_currency: 'setCurrency',
+            default_tax_rate: 'setTaxRate', default_discount_rate: 'setDiscountRate',
+            default_payment_status: 'setDefaultStatus', payment_terms: 'setTerms',
+            invoice_footer: 'setFooter', accent_color: 'setAccent', theme: 'setTheme'
+        };
+        const el = document.getElementById(map[k]);
+        const raw = el ? el.value : '';
+        if (raw === '' && ['business_name','business_address','business_email','business_phone','business_gstin','payment_terms','invoice_footer'].includes(k)) {
+            payload[k] = '';
+        } else {
+            payload[k] = raw;
+        }
+    });
+    // Numeric coercion
+    payload.default_tax_rate = parseFloat(payload.default_tax_rate) || 0;
+    payload.default_discount_rate = parseFloat(payload.default_discount_rate) || 0;
+    try {
+        const res = await authFetch('/api/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok || data.error || data.detail) {
+            showToast(data.error || data.detail || 'Could not save settings', 'error');
+            return;
+        }
+        setTheme((data.settings || {}).theme || payload.theme || 'dark');
+        showToast('Settings saved', 'success');
+    } catch (err) {
+        showToast('Could not save settings', 'error');
+    }
 }
 
 // ─── Utilities ──────────────────────────────────────────────────────────────

@@ -62,6 +62,11 @@
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5c-5 0-9 3-9 7s4 7 9 7 9-3 9-7-4-7-9-7z"/><path d="M12 5v14"/><path d="M6 12h12"/></svg>
                 GST Reports
             </a>
+            <div class="nav-section-label">System</div>
+            <a href="#" class="nav-item" data-page="settings" onclick="showPage('settings')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                Settings
+            </a>
         </nav>
         <div class="sidebar-footer">
             <div class="status-indicator" id="statusIndicator">
@@ -91,6 +96,9 @@
                 </button>
                 <button class="btn-icon" onclick="showPage('scan')" title="New scan">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
+                <button class="btn-icon" onclick="showPage('settings')" title="Settings">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 </button>
                 <div class="user-avatar">JP</div>
             </div>
@@ -414,6 +422,76 @@
                             <button class="btn btn-secondary" onclick="exportCSV()">Export CSV</button>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+        <!-- ═══ Settings Page ═══ -->
+        <div class="page" id="page-settings">
+            <div class="page-header">
+                <h1>Settings</h1>
+                <p class="page-subtitle">Configure your business, invoice defaults, preferences and integrations</p>
+            </div>
+            <div class="settings-layout">
+                <div class="card settings-form">
+                    <div class="card-header"><h3>Business Profile</h3></div>
+                    <div class="card-body settings-body">
+                        <div class="gen-grid">
+                            <div class="full"><label>Business Name</label><input class="gen-input" id="setBusinessName" placeholder="Your Company Pvt Ltd"></div>
+                            <div class="full"><label>Address</label><textarea class="gen-input" id="setBusinessAddress" rows="2" placeholder="12 MG Road, Jaipur, Rajasthan 302001"></textarea></div>
+                            <div><label>Email</label><input class="gen-input" id="setBusinessEmail" placeholder="billing@yourcompany.in"></div>
+                            <div><label>Phone</label><input class="gen-input" id="setBusinessPhone" placeholder="+91 98765 43210"></div>
+                            <div><label>GSTIN</label><input class="gen-input" id="setBusinessGstin" placeholder="08AABCD1234F1Z5"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card settings-form">
+                    <div class="card-header"><h3>Invoice Defaults</h3></div>
+                    <div class="card-body settings-body">
+                        <div class="gen-grid">
+                            <div><label>Default Currency</label><select class="gen-input" id="setCurrency"></select></div>
+                            <div><label>Default Tax Rate %</label><input class="gen-input" id="setTaxRate" type="number" step="0.01" value="18"></div>
+                            <div><label>Default Discount %</label><input class="gen-input" id="setDiscountRate" type="number" step="0.01" value="0"></div>
+                            <div><label>Default Status</label><select class="gen-input" id="setDefaultStatus"><option value="Pending">Pending</option><option value="Paid">Paid</option><option value="Overdue">Overdue</option></select></div>
+                            <div class="full"><label>Payment Terms</label><input class="gen-input" id="setTerms" placeholder="Payment due within 30 days"></div>
+                            <div class="full"><label>Invoice Footer</label><input class="gen-input" id="setFooter" placeholder="Thank you for your business!"></div>
+                            <div><label>Accent Color</label><input class="gen-input" id="setAccent" type="color" value="#4f46e5" style="height:38px;padding:4px;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card settings-form">
+                    <div class="card-header"><h3>Preferences</h3></div>
+                    <div class="card-body settings-body">
+                        <div class="gen-grid">
+                            <div><label>Theme</label><select class="gen-input" id="setTheme"><option value="dark">Dark</option><option value="light">Light</option></select></div>
+                        </div>
+                        <p class="settings-hint">Theme is applied immediately and saved with your settings.</p>
+                    </div>
+                </div>
+
+                <div class="card settings-form">
+                    <div class="card-header"><h3>Integrations &amp; Health</h3></div>
+                    <div class="card-body settings-body">
+                        <div class="settings-status" id="settingsHealth"><div class="loading">Loading status...</div></div>
+                    </div>
+                </div>
+
+                <div class="card settings-form">
+                    <div class="card-header"><h3>Data Management</h3></div>
+                    <div class="card-body settings-body">
+                        <p class="settings-hint">Export all stored invoices for accounting or backup.</p>
+                        <div class="result-actions">
+                            <button class="btn btn-primary" onclick="exportCSV()">Export CSV</button>
+                            <button class="btn btn-secondary" onclick="exportTally()">Export Tally XML</button>
+                            <button class="btn btn-secondary" onclick="exportQuickBooks()">Export QuickBooks IIF</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-actions">
+                    <button class="btn btn-primary btn-lg" onclick="saveSettings()">Save Settings</button>
+                    <button class="btn btn-secondary btn-lg" onclick="loadSettings()">Reset View</button>
                 </div>
             </div>
         </div>

@@ -315,6 +315,15 @@ def init_database():
             except:
                 pass
             conn.commit()
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT,
+                    settings TEXT DEFAULT '{}',
+                    updated_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+
         else:
             # PostgreSQL schema
             cur = conn.cursor()
@@ -399,6 +408,18 @@ def init_database():
             try:
                 cur.execute("ALTER TABLE invoice_templates ADD COLUMN IF NOT EXISTS is_builtin INTEGER DEFAULT 0")
                 cur.execute("UPDATE invoice_templates SET is_builtin = 1 WHERE user_id IS NULL AND name = 'Business Default' AND is_builtin = 0")
+            except:
+                pass
+
+            try:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS app_settings (
+                        id TEXT PRIMARY KEY,
+                        user_id TEXT,
+                        settings JSONB DEFAULT '{}'::jsonb,
+                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                    )
+                """)
             except:
                 pass
 
@@ -1693,6 +1714,153 @@ def _generate_demo_result(filename: str) -> dict:
     }
 
 
+# ─── App Settings ───────────────────────────────────────────────────────────
+
+DEFAULT_SETTINGS = {
+    # Business / company profile (used as generated-invoice defaults)
+    "business_name": "",
+    "business_address": "",
+    "business_email": "",
+    "business_phone": "",
+    "business_gstin": "",
+    # Invoice defaults
+    "default_currency": "INR",
+    "default_tax_rate": 18.0,
+    "default_discount_rate": 0.0,
+    "payment_terms": "Payment due within 30 days",
+    "invoice_footer": "Thank you for your business!",
+    "default_payment_status": "Pending",
+    "accent_color": "#4f46e5",
+    # Preferences
+    "theme": "dark",
+}
+
+
+def _settings_key(user_id) -> str:
+    return user_id or "__global__"
+
+
+def _get_settings_row(conn, user_id: Optional[str]) -> Optional[dict]:
+    key = _settings_key(user_id)
+    if USE_SQLITE_FALLBACK:
+        return conn.execute(
+            "SELECT settings FROM app_settings WHERE user_id = ?", (key,)
+        ).fetchone()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT settings FROM app_settings WHERE user_id = %s", (key,))
+    row = cur.fetchone()
+    cur.close()
+    return row
+
+
+def _load_settings(conn, user_id: Optional[str]) -> dict:
+    """Return merged settings: defaults + persisted overrides."""
+    merged = dict(DEFAULT_SETTINGS)
+    row = _get_settings_row(conn, user_id)
+    if row:
+        raw = row["settings"]
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                raw = {}
+        if isinstance(raw, dict):
+            for k, v in raw.items():
+                if k in DEFAULT_SETTINGS and v not in (None, ""):
+                    merged[k] = v
+    return merged
+
+
+def _save_settings(conn, user_id: Optional[str], body: dict) -> dict:
+    key = _settings_key(user_id)
+    clean = {}
+    for k in DEFAULT_SETTINGS:
+        if k in body and body[k] not in (None, ""):
+            clean[k] = body[k]
+    settings_json = json.dumps(clean)
+    row = _get_settings_row(conn, user_id)
+    if USE_SQLITE_FALLBACK:
+        if row:
+            conn.execute(
+                "UPDATE app_settings SET settings = ?, updated_at = datetime('now') WHERE user_id = ?",
+                (settings_json, key),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO app_settings (id, user_id, settings, updated_at) VALUES (?, ?, ?, datetime('now'))",
+                (str(uuid.uuid4()), key, settings_json),
+            )
+    else:
+        if row:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE app_settings SET settings = %s::jsonb, updated_at = NOW() WHERE user_id = %s",
+                (settings_json, key),
+            )
+            cur.close()
+        else:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO app_settings (id, user_id, settings, updated_at) VALUES (%s, %s, %s::jsonb, NOW())",
+                (str(uuid.uuid4()), key, settings_json),
+            )
+            cur.close()
+    conn.commit()
+    return _load_settings(conn, user_id)
+
+
+@app.get("/api/settings")
+async def get_settings(request: Request):
+    """Get saved user/global settings plus integration status."""
+    user_id = get_optional_current_user(request)
+    merged = dict(DEFAULT_SETTINGS)
+    try:
+        conn = get_db_connection()
+        try:
+            merged = _load_settings(conn, user_id)
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"⚠️  Settings load failed: {e}")
+    return {
+        "success": True,
+        "settings": merged,
+        "defaults": DEFAULT_SETTINGS,
+        "health": {
+            "ocr_configured": bool(OCR_SPACE_API_KEY),
+            "ai_configured": bool(AI_API_KEY),
+            "auth_enabled": AUTH_ENABLED,
+            "database": "PostgreSQL" if not USE_SQLITE_FALLBACK else "SQLite (local)",
+        },
+        "currencies": list(EXCHANGE_RATES_TO_INR.keys()),
+    }
+
+
+@app.put("/api/settings")
+async def update_settings(request: Request):
+    """Save user/global settings."""
+    user_id = get_optional_current_user(request)
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Settings payload must be a JSON object")
+    # Coerce numeric fields.
+    for k in ("default_tax_rate", "default_discount_rate"):
+        if k in body and body[k] not in (None, ""):
+            try:
+                body[k] = float(body[k])
+            except (TypeError, ValueError):
+                raise HTTPException(400, f"{k} must be a number")
+    try:
+        conn = get_db_connection()
+        try:
+            settings = _save_settings(conn, user_id, body)
+        finally:
+            conn.close()
+    except Exception as e:
+        raise HTTPException(500, f"Could not save settings: {e}")
+    return {"success": True, "settings": settings}
+
+
 # ─── Invoice Templates & Generator ──────────────────────────────────────────
 
 _TEMPLATE_FIELDS = [
@@ -2268,29 +2436,51 @@ async def generate_invoice(request: Request):
         finally:
             conn.close()
 
+    # Load saved user/global settings as defaults (overridden by template/body).
+    settings = dict(DEFAULT_SETTINGS)
+    try:
+        conn = get_db_connection()
+        try:
+            settings = _load_settings(conn, user_id)
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"⚠️  Settings load failed in generator: {e}")
+
     def t(key, fallback=""):
         if template and template.get(key) not in (None, ""):
             return template[key]
-        return body.get(key, fallback)
+        if body.get(key) not in (None, ""):
+            return body[key]
+        return fallback
 
     customer = body.get("customer") or {}
-    from_name = t("from_name", "") or "Your Business"
-    from_address = t("from_address", "")
-    from_email = t("from_email", "")
-    from_phone = t("from_phone", "")
-    from_gstin = t("from_gstin", "")
+    from_name = t("from_name", settings.get("business_name", "")) or "Your Business"
+    from_address = t("from_address", settings.get("business_address", ""))
+    from_email = t("from_email", settings.get("business_email", ""))
+    from_phone = t("from_phone", settings.get("business_phone", ""))
+    from_gstin = t("from_gstin", settings.get("business_gstin", ""))
     to_name = customer.get("name") or t("to_name", "")
     to_address = customer.get("address") or t("to_address", "")
     to_email = customer.get("email") or t("to_email", "")
     to_phone = customer.get("phone") or t("to_phone", "")
     to_gstin = customer.get("gstin") or t("to_gstin", "")
 
-    currency = body.get("currency") or (template.get("currency") if template else "INR") or "INR"
-    tax_rate = _to_float(body.get("tax_rate"), _to_float(template.get("tax_rate") if template else 18.0, 18.0))
-    discount = _to_float(body.get("discount"), _to_float(template.get("discount_rate") if template else 0.0, 0.0))
-    terms = body.get("terms") or t("terms", "")
-    footer = body.get("footer") or t("footer", "")
-    accent = body.get("accent_color") or t("accent_color", "#4f46e5")
+    currency = (body.get("currency")
+                or (template.get("currency") if template else "")
+                or settings.get("default_currency", "INR")
+                or "INR")
+    tax_rate = _to_float(
+        body.get("tax_rate"),
+        _to_float(template.get("tax_rate") if template else settings.get("default_tax_rate", 18.0), 18.0),
+    )
+    discount = _to_float(
+        body.get("discount"),
+        _to_float(template.get("discount_rate") if template else settings.get("default_discount_rate", 0.0), 0.0),
+    )
+    terms = body.get("terms") or t("terms", settings.get("payment_terms", ""))
+    footer = body.get("footer") or t("footer", settings.get("invoice_footer", ""))
+    accent = body.get("accent_color") or t("accent_color", settings.get("accent_color", "#4f46e5"))
 
     items = _normalize_line_items(body.get("line_items") or (template.get("line_items") if template else []))
 
@@ -2335,7 +2525,7 @@ async def generate_invoice(request: Request):
         "category": category or "Uncategorized",
         "categorization_source": cat_src,
         "category_confidence": cat_conf,
-        "payment_status": body.get("payment_status") or "Pending",
+        "payment_status": body.get("payment_status") or settings.get("default_payment_status", "Pending") or "Pending",
         "notes": notes,
         "line_items": items,
         "confidence_score": 98,
